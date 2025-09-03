@@ -308,6 +308,41 @@ def verificar_token_valido(token_portador):
     except Exception:
         return False
 
+def verificar_permisos_asesor(token_portador):
+    """
+    Verifica si el usuario tiene permisos de asesor haciendo una petición de prueba
+    """
+    if not token_portador:
+        return False, "No hay token de acceso"
+    
+    try:
+        # Intentar obtener la lista de clientes como prueba de permisos de asesor
+        url_clientes = 'https://api.invertironline.com/api/v2/Asesores/Clientes'
+        headers = obtener_encabezado_autorizacion(token_portador)
+        
+        if not headers:
+            return False, "No se pudieron generar headers de autorización"
+        
+        print("🔍 Verificando permisos de asesor...")
+        respuesta = requests.get(url_clientes, headers=headers, timeout=10)
+        
+        if respuesta.status_code == 200:
+            print("✅ Usuario tiene permisos de asesor")
+            return True, "Permisos de asesor confirmados"
+        elif respuesta.status_code == 401:
+            print("❌ Usuario no autorizado para funciones de asesor")
+            return False, "No autorizado para funciones de asesor"
+        elif respuesta.status_code == 403:
+            print("❌ Acceso prohibido a funciones de asesor")
+            return False, "Acceso prohibido a funciones de asesor"
+        else:
+            print(f"⚠️ Respuesta inesperada: {respuesta.status_code}")
+            return False, f"Respuesta inesperada: {respuesta.status_code}"
+            
+    except Exception as e:
+        print(f"💥 Error al verificar permisos: {e}")
+        return False, f"Error de conexión: {str(e)}"
+
 def renovar_token(refresh_token):
     """
     Renueva el token de acceso usando el refresh token.
@@ -316,26 +351,43 @@ def renovar_token(refresh_token):
         return None
     
     try:
-        url_renovacion = 'https://api.invertironline.com/api/v2/estadocuenta'
+        # Usar el endpoint correcto para renovar tokens
+        url_renovacion = 'https://api.invertironline.com/api/v2/token'
         datos = {
             'grant_type': 'refresh_token',
             'refresh_token': refresh_token
         }
         
+        # Headers para la renovación de token
+        headers = {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/json'
+        }
+        
         print("🔄 Intentando renovar token de acceso...")
-        respuesta = requests.post(url_renovacion, data=datos, timeout=15)
+        respuesta = requests.post(url_renovacion, data=datos, headers=headers, timeout=15)
+        
+        print(f"📡 Respuesta renovación token: {respuesta.status_code}")
         
         if respuesta.status_code == 200:
             respuesta_json = respuesta.json()
             nuevo_access_token = respuesta_json.get('access_token')
+            nuevo_refresh_token = respuesta_json.get('refresh_token')
+            
             if nuevo_access_token:
                 print("✅ Token renovado exitosamente")
+                # Actualizar también el refresh token si se recibió uno nuevo
+                if nuevo_refresh_token:
+                    st.session_state['refresh_token'] = nuevo_refresh_token
+                    print("🔄 Refresh token actualizado")
                 return nuevo_access_token
             else:
                 print("❌ No se recibió nuevo access_token")
+                print(f"📋 Respuesta completa: {respuesta_json}")
                 return None
         else:
             print(f"❌ Error al renovar token: {respuesta.status_code}")
+            print(f"📋 Respuesta: {respuesta.text}")
             return None
             
     except Exception as e:
@@ -1870,6 +1922,19 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
             print("❌ No hay refresh_token disponible")
             return None
     
+    # Verificar permisos de asesor antes de hacer la petición
+    tiene_permisos, mensaje = verificar_permisos_asesor(token_portador)
+    if not tiene_permisos:
+        print(f"❌ No tiene permisos de asesor: {mensaje}")
+        st.error("🔐 **Error de Permisos**")
+        st.warning("⚠️ **Su cuenta no tiene permisos de asesor**")
+        st.info("💡 **Para acceder a movimientos de clientes necesita:**")
+        st.info("• Una cuenta con permisos de asesor en IOL")
+        st.info("• Credenciales de asesor válidas")
+        st.info("• Acceso habilitado a los endpoints de asesor")
+        st.info("• Contactar a IOL para solicitar estos permisos")
+        return None
+    
     url = "https://api.invertironline.com/api/v2/Asesor/Movimientos"
     headers = obtener_encabezado_autorizacion(token_portador)
     
@@ -1926,47 +1991,44 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
             else:
                 print(f"⚠️ Estructura de respuesta inesperada: {type(data)}")
                 return {'movimientos': data}
-                
         elif response.status_code == 401:
-            print(f"❌ Error 401: No autorizado para movimientos")
-            print(f"📝 Respuesta del servidor: {response.text}")
-            st.warning("⚠️ **Problema de Autorización**: No tienes permisos para acceder a los movimientos")
-            st.info("💡 **Posibles causas:**")
-            st.info("• Tu cuenta no tiene permisos de asesor")
-            st.info("• El token de acceso ha expirado")
-            st.info("• Necesitas permisos adicionales para esta funcionalidad")
-            st.info("• La API requiere autenticación especial para este endpoint")
+            print("❌ Error 401: Authorization denied")
+            print("💡 Posibles causas:")
+            print("   - Token de acceso expirado")
+            print("   - Token no tiene permisos de asesor")
+            print("   - Credenciales incorrectas")
             
-            # Intentar renovar token y reintentar una vez
+            # Intentar renovar el token
             refresh_token = st.session_state.get('refresh_token')
             if refresh_token:
-                print("🔄 Reintentando con token renovado...")
+                print("🔄 Intentando renovar token...")
                 nuevo_token = renovar_token(refresh_token)
                 if nuevo_token:
+                    print("✅ Token renovado, reintentando petición...")
                     st.session_state['token_acceso'] = nuevo_token
+                    # Reintentar con el nuevo token
                     headers = obtener_encabezado_autorizacion(nuevo_token)
                     if headers:
                         response = requests.post(url, headers=headers, json=payload, timeout=30)
                         if response.status_code == 200:
-                            print("✅ Movimientos obtenidos en reintento")
                             data = response.json()
-                            if isinstance(data, dict):
-                                if 'movimientos' in data:
-                                    return data
-                                elif 'data' in data:
-                                    return {'movimientos': data['data']}
-                                else:
-                                    return {'movimientos': data}
-                            elif isinstance(data, list):
-                                return {'movimientos': data}
-                            else:
-                                return {'movimientos': data}
-                        elif response.status_code == 401:
-                            st.error("❌ **Persiste el problema de autorización**")
-                            st.info("🔐 **Solución recomendada:**")
-                            st.info("1. Verifica que tu cuenta tenga permisos de asesor")
-                            st.info("2. Contacta a IOL para solicitar acceso a estos endpoints")
-                            st.info("3. La aplicación usará datos simulados como alternativa")
+                            print("✅ Movimientos obtenidos después de renovar token")
+                            return {'movimientos': data} if isinstance(data, list) else data
+                        else:
+                            print(f"❌ Error persistente después de renovar token: {response.status_code}")
+                else:
+                    print("❌ No se pudo renovar el token")
+            else:
+                print("❌ No hay refresh_token disponible")
+            
+            # Mostrar mensaje al usuario
+            st.error("🔐 **Error de Autenticación**")
+            st.warning("⚠️ **No se pudo acceder a los movimientos reales**")
+            st.info("💡 **Causas posibles:**")
+            st.info("• Su token de acceso ha expirado")
+            st.info("• Su cuenta no tiene permisos de asesor")
+            st.info("• Las credenciales no son correctas")
+            st.info("• La API está en mantenimiento")
             
             return None
         elif response.status_code == 403:
@@ -2639,6 +2701,11 @@ def mostrar_analisis_integrado(token_acceso, cliente):
     # Análisis de movimientos
     st.markdown("#### 📈 Análisis de Movimientos")
     
+    # Verificar si los datos son simulados
+    metodo = movimientos.get('metodo', 'desconocido')
+    if metodo in ['alternativo_estado_cuenta', 'respaldo_minimo', 'emergencia', 'ultimo_recurso', 'ejemplo', 'simulado', 'demo']:
+        mostrar_advertencia_datos_simulados()
+    
     if 'movimientos' in movimientos and movimientos['movimientos']:
         df_mov = pd.DataFrame(movimientos['movimientos'])
         
@@ -2775,6 +2842,28 @@ def calcular_rendimiento_desde_movimientos(movimientos_lista, estado_cuenta):
         print(f"Error al calcular rendimiento: {e}")
         return None
 
+def mostrar_advertencia_datos_simulados():
+    """
+    Muestra una advertencia clara sobre los datos simulados
+    """
+    st.error("🚨 **ESTOS DATOS NO SON REALES** 🚨")
+    st.warning("⚠️ **Advertencia Importante**")
+    st.info("📊 **Los datos mostrados son simulados por las siguientes razones:**")
+    st.info("• Su cuenta no tiene permisos de asesor en IOL")
+    st.info("• El token de acceso ha expirado o es inválido")
+    st.info("• La API de IOL está en mantenimiento")
+    st.info("• Problemas de conectividad con los servidores")
+    
+    st.markdown("---")
+    st.info("💡 **Para obtener datos reales:**")
+    st.info("1. **Verifique sus credenciales** de IOL")
+    st.info("2. **Contacte a IOL** para solicitar permisos de asesor")
+    st.info("3. **Espere a que termine el mantenimiento** si la API está caída")
+    st.info("4. **Verifique su conexión a internet**")
+    
+    st.markdown("---")
+    st.success("✅ **La aplicación funciona con datos simulados para demostración**")
+
 def mostrar_movimientos_y_analisis(movimientos, token_portador):
     """
     Muestra los movimientos y análisis de retorno y riesgo
@@ -2788,8 +2877,9 @@ def mostrar_movimientos_y_analisis(movimientos, token_portador):
     # Mostrar información sobre el tipo de datos obtenidos
     metodo = movimientos.get('metodo', 'desconocido')
     if metodo in ['alternativo_estado_cuenta', 'respaldo_minimo', 'emergencia', 'ultimo_recurso']:
-        st.warning(f"⚠️ **Datos Simulados**: Los movimientos mostrados son simulados debido a limitaciones de acceso a la API. Método: {metodo}")
-        st.info("💡 **Nota**: Los datos simulados permiten que la aplicación funcione, pero los análisis de retorno y riesgo serán aproximados.")
+        mostrar_advertencia_datos_simulados()
+    elif metodo in ['ejemplo', 'simulado', 'demo']:
+        mostrar_advertencia_datos_simulados()
     
     # Mostrar movimientos básicos
     st.markdown("#### 📋 Movimientos del Período")
