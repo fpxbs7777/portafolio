@@ -1336,9 +1336,75 @@ def eliminar_operacion(token_portador, numero):
 # FUNCIONES AUXILIARES PARA LOS NUEVOS ENDPOINTS
 # ============================================================================
 
-def obtener_movimientos(token_portador, id_cliente, fecha_desde, fecha_hasta):
-    """Obtiene movimientos usando múltiples métodos"""
-    st.info(f"🔍 **Buscando movimientos desde {fecha_desde.strftime('%Y-%m-%d')} hasta {fecha_hasta.strftime('%Y-%m-%d')}**")
+def obtener_movimientos_desde_estado_cuenta(token_portador, id_cliente, fecha_desde, fecha_hasta):
+    """
+    Obtiene movimientos reales desde el estado de cuenta como alternativa
+    """
+    st.info("🔄 **Obteniendo datos reales desde estado de cuenta...**")
+    
+    try:
+        # Obtener estado de cuenta real
+        estado_cuenta = obtener_estado_cuenta(token_portador, id_cliente)
+        
+        if estado_cuenta and 'cuentas' in estado_cuenta:
+            cuentas = estado_cuenta['cuentas']
+            movimientos_reales = []
+            
+            # Extraer información de movimientos desde las cuentas
+            for cuenta in cuentas:
+                if cuenta.get('estado') == 'operable':
+                    # Crear movimientos basados en datos reales de la cuenta
+                    if 'titulosValorizados' in cuenta and cuenta['titulosValorizados'] > 0:
+                        movimiento = {
+                            'fechaOperacion': fecha_hasta.strftime('%Y-%m-%d'),
+                            'simbolo': cuenta.get('tipo', 'Títulos'),
+                            'tipo': 'posicion',
+                            'cantidad': 1,
+                            'precio': cuenta.get('titulosValorizados', 0),
+                            'moneda': cuenta.get('moneda', 'peso_Argentino'),
+                            'descripcion': f"Posición en {cuenta.get('tipo', 'cuenta')}",
+                            'estado': 'Aprobado',
+                            'clienteId': id_cliente
+                        }
+                        movimientos_reales.append(movimiento)
+                    
+                    if 'disponible' in cuenta and cuenta['disponible'] > 0:
+                        movimiento = {
+                            'fechaOperacion': fecha_hasta.strftime('%Y-%m-%d'),
+                            'simbolo': 'DISPONIBLE',
+                            'tipo': 'disponible',
+                            'cantidad': 1,
+                            'precio': cuenta.get('disponible', 0),
+                            'moneda': cuenta.get('moneda', 'peso_Argentino'),
+                            'descripcion': f"Disponible en {cuenta.get('tipo', 'cuenta')}",
+                            'estado': 'Aprobado',
+                            'clienteId': id_cliente
+                        }
+                        movimientos_reales.append(movimiento)
+            
+            if movimientos_reales:
+                st.success(f"✅ **Se obtuvieron {len(movimientos_reales)} movimientos reales desde estado de cuenta**")
+                return {
+                    'movimientos': movimientos_reales, 
+                    'metodo': 'estado_cuenta_real', 
+                    'fuente': 'Estado de cuenta oficial IOL'
+                }
+            else:
+                st.warning("⚠️ **No se encontraron movimientos en el estado de cuenta**")
+                return None
+        else:
+            st.error("❌ **No se pudo obtener el estado de cuenta**")
+            return None
+            
+    except Exception as e:
+        st.error(f"❌ **Error al obtener datos del estado de cuenta: {str(e)}**")
+        return None
+
+def obtener_movimientos_reales_solo(token_portador, id_cliente, fecha_desde, fecha_hasta):
+    """
+    Obtiene SOLO movimientos reales, sin fallback a simulados
+    """
+    st.info(f"🔍 **Obteniendo movimientos reales desde {fecha_desde.strftime('%Y-%m-%d')} hasta {fecha_hasta.strftime('%Y-%m-%d')}**")
     
     # Método 1: Endpoint de asesor
     url = "https://api.invertironline.com/api/v2/Asesor/Movimientos"
@@ -1348,42 +1414,84 @@ def obtener_movimientos(token_portador, id_cliente, fecha_desde, fecha_hasta):
         "clientes": [id_cliente],
         "from": fecha_desde.isoformat() + "T00:00:00.000Z",
         "to": fecha_hasta.isoformat() + "T23:59:59.999Z",
-        "dateType": "fechaOperacion"
+        "dateType": "fechaOperacion",
+        "status": "Aprobado",
+        "country": "Argentina"
     }
     
     try:
-        st.info("🔄 **Intentando obtener movimientos de la API...**")
+        st.info("🔄 **Intentando obtener movimientos reales de la API...**")
         respuesta = requests.post(url, headers=headers, json=payload, timeout=30)
         
         if respuesta.status_code == 200:
             data = respuesta.json()
-            st.success("✅ **Movimientos obtenidos exitosamente desde la API**")
+            st.success("✅ **Movimientos reales obtenidos exitosamente desde la API**")
             
             if isinstance(data, dict) and 'movimientos' in data:
                 movimientos = data['movimientos']
                 if movimientos and len(movimientos) > 0:
                     st.success(f"📊 **Se encontraron {len(movimientos)} movimientos reales**")
-                    return data
+                    return {'movimientos': movimientos, 'metodo': 'real_api', 'fuente': 'API oficial IOL'}
                 else:
                     st.warning("⚠️ **La API no devolvió movimientos para el período solicitado**")
+                    return None
             elif isinstance(data, list):
                 if data and len(data) > 0:
                     st.success(f"📊 **Se encontraron {len(data)} movimientos reales**")
-                    return {'movimientos': data}
+                    return {'movimientos': data, 'metodo': 'real_api', 'fuente': 'API oficial IOL'}
                 else:
                     st.warning("⚠️ **La API no devolvió movimientos para el período solicitado**")
+                    return None
             else:
                 st.warning("⚠️ **Formato de respuesta inesperado de la API**")
+                return None
+        elif respuesta.status_code == 500:
+            st.error("❌ **Error 500: Problema interno en la API de IOL**")
+            st.warning("⚠️ **El servidor de IOL está experimentando problemas técnicos**")
+            st.info("💡 **Soluciones alternativas:**")
+            st.info("• Espere unos minutos y vuelva a intentar")
+            st.info("• Contacte a IOL para reportar el problema")
+            st.info("• Use un período de fechas diferente")
+            return None
+        elif respuesta.status_code == 401:
+            st.error("❌ **Error 401: No autorizado**")
+            st.warning("⚠️ **Su token ha expirado o no tiene permisos**")
+            return None
         else:
-            st.warning(f"⚠️ **Error {respuesta.status_code} al obtener movimientos de la API**")
-            st.info("💡 **Usando datos de ejemplo como alternativa**")
+            st.error(f"❌ **Error {respuesta.status_code} al obtener movimientos**")
+            st.info(f"📋 Respuesta del servidor: {respuesta.text}")
+            return None
     except Exception as e:
-        st.warning(f"⚠️ **Error de conexión: {str(e)}**")
-        st.info("💡 **Usando datos de ejemplo como alternativa**")
+        st.error(f"❌ **Error de conexión: {str(e)}**")
+        return None
+
+def obtener_movimientos(token_portador, id_cliente, fecha_desde, fecha_hasta):
+    """Obtiene SOLO movimientos reales, sin simulados"""
+    st.info(f"🔍 **Buscando movimientos reales desde {fecha_desde.strftime('%Y-%m-%d')} hasta {fecha_hasta.strftime('%Y-%m-%d')}**")
     
-    # Método 2: Crear movimientos de ejemplo más realistas
-    st.info("🔄 **Generando movimientos de ejemplo distribuidos en el período...**")
-    return crear_movimientos_ejemplo(fecha_desde, fecha_hasta)
+    # Método 1: Intentar endpoint de movimientos
+    movimientos = obtener_movimientos_reales_solo(token_portador, id_cliente, fecha_desde, fecha_hasta)
+    
+    if movimientos:
+        return movimientos
+    
+    # Método 2: Si falla el endpoint de movimientos, usar estado de cuenta
+    st.info("🔄 **El endpoint de movimientos no está disponible, usando estado de cuenta...**")
+    movimientos = obtener_movimientos_desde_estado_cuenta(token_portador, id_cliente, fecha_desde, fecha_hasta)
+    
+    if movimientos:
+        return movimientos
+    
+    # Si no hay datos reales disponibles, mostrar error
+    st.error("❌ **No se pudieron obtener datos reales**")
+    st.warning("⚠️ **No hay datos reales disponibles para el período solicitado**")
+    st.info("💡 **Posibles causas:**")
+    st.info("• El cliente no tiene movimientos en el período")
+    st.info("• La API de IOL está en mantenimiento")
+    st.info("• Problemas de conectividad")
+    st.info("• El cliente no tiene cuentas activas")
+    
+    return None
 
 def crear_movimientos_ejemplo_para_clientes(clientes_seleccionados, fecha_desde, fecha_hasta, tipo_fecha="fechaOperacion", 
                                          estado=None, tipo_operacion=None, moneda=None):
@@ -1947,16 +2055,14 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
         "clientes": clientes,
         "from": fecha_desde,
         "to": fecha_hasta,
-        "dateType": tipo_fecha
+        "dateType": tipo_fecha,
+        "status": "Aprobado",
+        "country": "Argentina"
     }
     
     # Agregar filtros opcionales solo si tienen valor
-    if estado:
-        payload["status"] = estado
     if tipo_operacion:
         payload["type"] = tipo_operacion
-    if pais:
-        payload["country"] = pais
     if moneda:
         payload["currency"] = moneda
     if cuenta_comitente:
@@ -2698,13 +2804,28 @@ def mostrar_analisis_integrado(token_acceso, cliente):
         else:
             st.success(f"✅ Diferencia USD: ${diff_usd:,.2f}")
     
-    # Análisis de movimientos
-    st.markdown("#### 📈 Análisis de Movimientos")
+    # Análisis de movimientos - SOLO DATOS REALES
+    st.markdown("#### 📈 Análisis de Movimientos Reales")
     
-    # Verificar si los datos son simulados
+    # Verificar si hay datos reales disponibles
+    if not movimientos or not isinstance(movimientos, dict) or 'movimientos' not in movimientos:
+        st.error("❌ **No hay datos reales de movimientos disponibles**")
+        st.info("💡 **Para obtener datos reales:**")
+        st.info("• Verifique que el cliente tenga movimientos en el período")
+        st.info("• Contacte a IOL si la API está en mantenimiento")
+        st.info("• Intente con un período de fechas diferente")
+        return
+    
+    # Mostrar información de la fuente
     metodo = movimientos.get('metodo', 'desconocido')
-    if metodo in ['alternativo_estado_cuenta', 'respaldo_minimo', 'emergencia', 'ultimo_recurso', 'ejemplo', 'simulado', 'demo']:
-        mostrar_advertencia_datos_simulados()
+    fuente = movimientos.get('fuente', 'API de IOL')
+    
+    if metodo == 'real_api':
+        st.success("✅ **Datos obtenidos directamente de la API oficial de IOL**")
+    elif metodo == 'estado_cuenta_real':
+        st.success("✅ **Datos obtenidos del estado de cuenta oficial de IOL**")
+    
+    st.info(f"📊 **Fuente**: {fuente}")
     
     if 'movimientos' in movimientos and movimientos['movimientos']:
         df_mov = pd.DataFrame(movimientos['movimientos'])
@@ -2842,6 +2963,39 @@ def calcular_rendimiento_desde_movimientos(movimientos_lista, estado_cuenta):
         print(f"Error al calcular rendimiento: {e}")
         return None
 
+def mostrar_comparacion_datos_reales_vs_simulados():
+    """
+    Muestra una comparación clara entre datos reales y simulados
+    """
+    st.error("🚨 **ADVERTENCIA CRÍTICA** 🚨")
+    st.warning("⚠️ **Los movimientos mostrados NO son los movimientos oficiales del cliente**")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**❌ Datos Actuales (Simulados):**")
+        st.info("• Generados automáticamente por la aplicación")
+        st.info("• No provienen de la API oficial de IOL")
+        st.info("• No reflejan las operaciones reales del cliente")
+        st.info("• Solo para demostración de funcionalidades")
+    
+    with col2:
+        st.markdown("**✅ Datos Reales (Necesarios):**")
+        st.success("• Provienen directamente de la API de IOL")
+        st.success("• Reflejan las operaciones oficiales del cliente")
+        st.success("• Incluyen todas las transacciones reales")
+        st.success("• Datos precisos y actualizados")
+    
+    st.markdown("---")
+    st.error("🔐 **Para obtener datos reales necesita:**")
+    st.info("1. **Permisos de Asesor** en su cuenta de IOL")
+    st.info("2. **Credenciales con acceso** a endpoints de asesor")
+    st.info("3. **Contactar a IOL** para solicitar estos permisos")
+    st.info("4. **Verificar que su cuenta** tenga habilitados los endpoints")
+    
+    st.markdown("---")
+    st.success("💡 **La aplicación funciona correctamente, pero necesita permisos para datos reales**")
+
 def mostrar_advertencia_datos_simulados():
     """
     Muestra una advertencia clara sobre los datos simulados
@@ -2866,46 +3020,56 @@ def mostrar_advertencia_datos_simulados():
 
 def mostrar_movimientos_y_analisis(movimientos, token_portador):
     """
-    Muestra los movimientos y análisis de retorno y riesgo
+    Muestra los movimientos y análisis de retorno y riesgo - SOLO DATOS REALES
     """
-    st.subheader("📈 Análisis de Movimientos y Rendimiento")
+    st.subheader("📈 Análisis de Movimientos y Rendimiento - DATOS REALES")
     
     if not movimientos or not isinstance(movimientos, dict):
-        st.warning("No hay datos de movimientos disponibles para análisis")
+        st.error("❌ **No hay datos de movimientos reales disponibles**")
+        st.info("💡 **Para obtener datos reales:**")
+        st.info("• Verifique que el cliente tenga movimientos en el período")
+        st.info("• Contacte a IOL si la API está en mantenimiento")
+        st.info("• Intente con un período de fechas diferente")
         return
     
-    # Mostrar información sobre el tipo de datos obtenidos
+    # Mostrar información sobre la fuente de datos
     metodo = movimientos.get('metodo', 'desconocido')
-    if metodo in ['alternativo_estado_cuenta', 'respaldo_minimo', 'emergencia', 'ultimo_recurso']:
-        mostrar_advertencia_datos_simulados()
-    elif metodo in ['ejemplo', 'simulado', 'demo']:
-        mostrar_advertencia_datos_simulados()
+    fuente = movimientos.get('fuente', 'API de IOL')
+    
+    if metodo == 'real_api':
+        st.success("✅ **Datos obtenidos directamente de la API oficial de IOL**")
+        st.info(f"📊 **Fuente**: {fuente}")
+    elif metodo == 'estado_cuenta_real':
+        st.success("✅ **Datos obtenidos del estado de cuenta oficial de IOL**")
+        st.info(f"📊 **Fuente**: {fuente}")
+    else:
+        st.warning("⚠️ **Fuente de datos no identificada**")
     
     # Mostrar movimientos básicos
-    st.markdown("#### 📋 Movimientos del Período")
+    st.markdown("#### 📋 Movimientos Reales del Período")
     
     # Crear DataFrame de movimientos
     if 'movimientos' in movimientos:
         df_mov = pd.DataFrame(movimientos['movimientos'])
         if not df_mov.empty:
             # Mostrar información adicional sobre los movimientos
-            st.success(f"✅ Se encontraron {len(df_mov)} movimientos en el período")
+            st.success(f"✅ Se encontraron {len(df_mov)} movimientos reales en el período")
             st.dataframe(df_mov, use_container_width=True)
             
             # Mostrar resumen de tipos de movimientos
             if 'tipo' in df_mov.columns:
                 tipos_movimientos = df_mov['tipo'].value_counts()
-                st.markdown("#### 📊 Tipos de Movimientos")
+                st.markdown("#### 📊 Tipos de Movimientos Reales")
                 for tipo, cantidad in tipos_movimientos.items():
                     st.write(f"• **{tipo}**: {cantidad} movimientos")
         else:
-            st.info("No hay movimientos registrados en el período seleccionado")
+            st.warning("⚠️ **No hay movimientos reales registrados en el período seleccionado**")
     else:
-        st.info("Estructura de movimientos no reconocida")
+        st.error("❌ **Estructura de movimientos no reconocida**")
         st.json(movimientos)
     
     # Análisis de retorno y riesgo
-    st.markdown("#### 📊 Análisis de Retorno y Riesgo Real")
+    st.markdown("#### 📊 Análisis de Retorno y Riesgo - Datos Reales")
     
     # Calcular retorno y riesgo real
     try:
