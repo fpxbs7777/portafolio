@@ -1286,6 +1286,8 @@ def eliminar_operacion(token_portador, numero):
 
 def obtener_movimientos(token_portador, id_cliente, fecha_desde, fecha_hasta):
     """Obtiene movimientos usando múltiples métodos"""
+    st.info(f"🔍 **Buscando movimientos desde {fecha_desde.strftime('%Y-%m-%d')} hasta {fecha_hasta.strftime('%Y-%m-%d')}**")
+    
     # Método 1: Endpoint de asesor
     url = "https://api.invertironline.com/api/v2/Asesor/Movimientos"
     headers = obtener_encabezado_autorizacion(token_portador)
@@ -1298,51 +1300,261 @@ def obtener_movimientos(token_portador, id_cliente, fecha_desde, fecha_hasta):
     }
     
     try:
+        st.info("🔄 **Intentando obtener movimientos de la API...**")
         respuesta = requests.post(url, headers=headers, json=payload, timeout=30)
+        
         if respuesta.status_code == 200:
             data = respuesta.json()
+            st.success("✅ **Movimientos obtenidos exitosamente desde la API**")
+            
             if isinstance(data, dict) and 'movimientos' in data:
-                return data
+                movimientos = data['movimientos']
+                if movimientos and len(movimientos) > 0:
+                    st.success(f"📊 **Se encontraron {len(movimientos)} movimientos reales**")
+                    return data
+                else:
+                    st.warning("⚠️ **La API no devolvió movimientos para el período solicitado**")
             elif isinstance(data, list):
-                return {'movimientos': data}
+                if data and len(data) > 0:
+                    st.success(f"📊 **Se encontraron {len(data)} movimientos reales**")
+                    return {'movimientos': data}
+                else:
+                    st.warning("⚠️ **La API no devolvió movimientos para el período solicitado**")
             else:
-                return {'movimientos': data}
-    except:
-        pass
+                st.warning("⚠️ **Formato de respuesta inesperado de la API**")
+        else:
+            st.warning(f"⚠️ **Error {respuesta.status_code} al obtener movimientos de la API**")
+            st.info("💡 **Usando datos de ejemplo como alternativa**")
+    except Exception as e:
+        st.warning(f"⚠️ **Error de conexión: {str(e)}**")
+        st.info("💡 **Usando datos de ejemplo como alternativa**")
     
-    # Método 2: Crear movimientos de ejemplo
+    # Método 2: Crear movimientos de ejemplo más realistas
+    st.info("🔄 **Generando movimientos de ejemplo distribuidos en el período...**")
     return crear_movimientos_ejemplo(fecha_desde, fecha_hasta)
 
-def crear_movimientos_ejemplo(fecha_desde, fecha_hasta):
-    """Crea movimientos de ejemplo para demostración"""
-    return {
-        'metodo': 'ejemplo',
-        'fecha_desde': fecha_desde.isoformat(),
-        'fecha_hasta': fecha_hasta.isoformat(),
-        'movimientos': [
-            {
-                'fechaOperacion': fecha_desde.isoformat(),
-                'simbolo': 'GGAL',
+def crear_movimientos_ejemplo_para_clientes(clientes_seleccionados, fecha_desde, fecha_hasta, tipo_fecha="fechaOperacion", 
+                                         estado=None, tipo_operacion=None, moneda=None):
+    """Crea movimientos de ejemplo más realistas para múltiples clientes con filtros aplicados"""
+    
+    # Generar fechas distribuidas en el rango
+    fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+    
+    # Filtrar solo días hábiles (lunes a viernes)
+    fechas_habiles = [f for f in fechas if f.weekday() < 5]
+    
+    # Si hay muchas fechas, tomar una muestra representativa
+    if len(fechas_habiles) > 30:
+        fechas_habiles = fechas_habiles[::len(fechas_habiles)//30]
+    
+    # Activos comunes en Argentina
+    activos = [
+        {'simbolo': 'GGAL', 'descripcion': 'Grupo Galicia', 'precio_base': 1500},
+        {'simbolo': 'YPF', 'descripcion': 'YPF S.A.', 'precio_base': 2800},
+        {'simbolo': 'PAMP', 'descripcion': 'Pampa Energía', 'precio_base': 1200},
+        {'simbolo': 'TEN', 'descripcion': 'Tenaris', 'precio_base': 3500},
+        {'simbolo': 'CRES', 'descripcion': 'Cresud', 'precio_base': 800},
+        {'simbolo': 'ALUA', 'descripcion': 'Aluar', 'precio_base': 950},
+        {'simbolo': 'BMA', 'descripcion': 'Banco Macro', 'precio_base': 1800},
+        {'simbolo': 'EDN', 'descripcion': 'Edenor', 'precio_base': 450},
+        {'simbolo': 'TECO2', 'descripcion': 'Telecom', 'precio_base': 2200},
+        {'simbolo': 'SUPV', 'descripcion': 'Supervielle', 'precio_base': 750}
+    ]
+    
+    # Tipos de operación disponibles
+    tipos_operacion = ['compra', 'venta', 'transferencia', 'dividendo']
+    
+    # Estados disponibles
+    estados_disponibles = ['Aprobado', 'Pendiente', 'Rechazado']
+    
+    # Monedas disponibles
+    monedas_disponibles = ['peso_Argentino', 'dolar_Estadounidense', 'real_Brasileno']
+    
+    movimientos = []
+    
+    # Generar movimientos para cada cliente seleccionado
+    for cliente_id in clientes_seleccionados:
+        # Generar movimientos distribuidos en el tiempo para este cliente
+        for i, fecha in enumerate(fechas_habiles):
+            # Saltar algunos días para no generar demasiados movimientos
+            if i % 3 != 0:  # Solo generar movimientos cada 3 días
+                continue
+                
+            # Seleccionar activo aleatorio
+            activo = random.choice(activos)
+            
+            # Generar variación de precio realista (±10%)
+            variacion = random.uniform(-0.1, 0.1)
+            precio = activo['precio_base'] * (1 + variacion)
+            
+            # Determinar tipo de operación (aplicar filtro si existe)
+            if tipo_operacion:
+                tipo = tipo_operacion
+            else:
+                tipo = random.choice(tipos_operacion)
+            
+            # Generar cantidad realista
+            cantidad = random.randint(10, 500)
+            
+            # Calcular valor
+            valor = cantidad * precio
+            
+            # Generar descripción
+            descripcion = f"{tipo.title()} de {cantidad} acciones {activo['descripcion']}"
+            
+            # Estado (aplicar filtro si existe)
+            if estado:
+                estado_movimiento = estado
+            else:
+                estado_movimiento = random.choice(estados_disponibles)
+            
+            # Moneda (aplicar filtro si existe)
+            if moneda:
+                moneda_movimiento = moneda
+            else:
+                moneda_movimiento = random.choice(monedas_disponibles)
+            
+            # Crear movimiento con información del cliente
+            movimiento = {
+                'fechaOperacion': fecha.strftime('%Y-%m-%d'),
+                'fechaLiquidacion': (fecha + timedelta(days=2)).strftime('%Y-%m-%d'),
+                'simbolo': activo['simbolo'],
+                'tipo': tipo,
+                'cantidad': cantidad,
+                'precio': round(precio, 2),
+                'moneda': moneda_movimiento,
+                'descripcion': descripcion,
+                'valor': round(valor, 2),
+                'estado': estado_movimiento,
+                'tipoCuenta': 'inversion_Argentina_Pesos',
+                'clienteId': cliente_id,
+                'numeroCliente': cliente_id
+            }
+            
+            movimientos.append(movimiento)
+    
+    # Si no hay movimientos, crear al menos uno por cliente
+    if not movimientos:
+        for cliente_id in clientes_seleccionados:
+            activo = activos[0]
+            movimientos.append({
+                'fechaOperacion': fecha_desde.strftime('%Y-%m-%d'),
+                'fechaLiquidacion': (fecha_desde + timedelta(days=2)).strftime('%Y-%m-%d'),
+                'simbolo': activo['simbolo'],
                 'tipo': 'compra',
                 'cantidad': 100,
-                'precio': 1500.50,
-                'moneda': 'peso_Argentino',
-                'descripcion': 'Compra de acciones Galicia',
-                'valor': 150050.0,
-                'estado': 'Aprobado'
-            },
-            {
-                'fechaOperacion': (fecha_desde + timedelta(days=5)).isoformat(),
-                'simbolo': 'YPF',
-                'tipo': 'venta',
-                'cantidad': 50,
-                'precio': 2800.75,
-                'moneda': 'peso_Argentino',
-                'descripcion': 'Venta de acciones YPF',
-                'valor': 140037.5,
-                'estado': 'Aprobado'
-            }
-        ]
+                'precio': activo['precio_base'],
+                'moneda': moneda or 'peso_Argentino',
+                'descripcion': f"Compra de {activo['descripcion']}",
+                'valor': 100 * activo['precio_base'],
+                'estado': estado or 'Aprobado',
+                'tipoCuenta': 'inversion_Argentina_Pesos',
+                'clienteId': cliente_id,
+                'numeroCliente': cliente_id
+            })
+    
+    return {
+        'metodo': 'ejemplo_realista_multi_cliente',
+        'fecha_desde': fecha_desde.strftime('%Y-%m-%d'),
+        'fecha_hasta': fecha_hasta.strftime('%Y-%m-%d'),
+        'clientes_seleccionados': clientes_seleccionados,
+        'filtros_aplicados': {
+            'tipo_fecha': tipo_fecha,
+            'estado': estado,
+            'tipo_operacion': tipo_operacion,
+            'moneda': moneda
+        },
+        'movimientos': movimientos
+    }
+
+def crear_movimientos_ejemplo(fecha_desde, fecha_hasta):
+    """Crea movimientos de ejemplo para demostración con datos más realistas"""
+    # Generar fechas distribuidas en el rango
+    fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+    
+    # Filtrar solo días hábiles (lunes a viernes)
+    fechas_habiles = [f for f in fechas if f.weekday() < 5]
+    
+    # Si hay muchas fechas, tomar una muestra representativa
+    if len(fechas_habiles) > 30:
+        fechas_habiles = fechas_habiles[::len(fechas_habiles)//30]
+    
+    movimientos = []
+    
+    # Activos comunes en Argentina
+    activos = [
+        {'simbolo': 'GGAL', 'descripcion': 'Grupo Galicia', 'precio_base': 1500},
+        {'simbolo': 'YPF', 'descripcion': 'YPF S.A.', 'precio_base': 2800},
+        {'simbolo': 'PAMP', 'descripcion': 'Pampa Energía', 'precio_base': 1200},
+        {'simbolo': 'TEN', 'descripcion': 'Tenaris', 'precio_base': 3500},
+        {'simbolo': 'CRES', 'descripcion': 'Cresud', 'precio_base': 800},
+        {'simbolo': 'ALUA', 'descripcion': 'Aluar', 'precio_base': 950},
+        {'simbolo': 'BMA', 'descripcion': 'Banco Macro', 'precio_base': 1800},
+        {'simbolo': 'EDN', 'descripcion': 'Edenor', 'precio_base': 450},
+        {'simbolo': 'TECO2', 'descripcion': 'Telecom', 'precio_base': 2200},
+        {'simbolo': 'SUPV', 'descripcion': 'Supervielle', 'precio_base': 750}
+    ]
+    
+    # Generar movimientos distribuidos en el tiempo
+    for i, fecha in enumerate(fechas_habiles):
+        # Saltar algunos días para no generar demasiados movimientos
+        if i % 3 != 0:  # Solo generar movimientos cada 3 días
+            continue
+            
+        # Seleccionar activo aleatorio
+        activo = random.choice(activos)
+        
+        # Generar variación de precio realista (±10%)
+        variacion = random.uniform(-0.1, 0.1)
+        precio = activo['precio_base'] * (1 + variacion)
+        
+        # Determinar tipo de operación
+        tipo = random.choice(['compra', 'venta'])
+        
+        # Generar cantidad realista
+        cantidad = random.randint(10, 500)
+        
+        # Calcular valor
+        valor = cantidad * precio
+        
+        # Generar descripción
+        descripcion = f"{tipo.title()} de {cantidad} acciones {activo['descripcion']}"
+        
+        # Estado (la mayoría aprobados)
+        estado = 'Aprobado' if random.random() > 0.1 else 'Pendiente'
+        
+        movimientos.append({
+            'fechaOperacion': fecha.strftime('%Y-%m-%d'),
+            'simbolo': activo['simbolo'],
+            'tipo': tipo,
+            'cantidad': cantidad,
+            'precio': round(precio, 2),
+            'moneda': 'peso_Argentino',
+            'descripcion': descripcion,
+            'valor': round(valor, 2),
+            'estado': estado
+        })
+    
+    # Si no hay movimientos, crear al menos uno
+    if not movimientos:
+        activo = activos[0]
+        movimientos.append({
+            'fechaOperacion': fecha_desde.strftime('%Y-%m-%d'),
+            'simbolo': activo['simbolo'],
+            'tipo': 'compra',
+            'cantidad': 100,
+            'precio': activo['precio_base'],
+            'moneda': 'peso_Argentino',
+            'descripcion': f"Compra de {activo['descripcion']}",
+            'valor': 100 * activo['precio_base'],
+            'estado': 'Aprobado'
+        })
+    
+    return {
+        'metodo': 'ejemplo_realista',
+        'fecha_desde': fecha_desde.strftime('%Y-%m-%d'),
+        'fecha_hasta': fecha_hasta.strftime('%Y-%m-%d'),
+        'movimientos': movimientos
     }
 
 def mostrar_operaciones(token_portador):
@@ -6846,40 +7058,25 @@ def mostrar_movimientos_asesor():
                 except Exception as e:
                     st.warning(f"⚠️ Error en método alternativo: {str(e)}")
             
-            # Método 3: Si aún falla, crear movimientos de ejemplo
+            # Método 3: Si aún falla, crear movimientos de ejemplo más realistas
             if not movimientos:
-                st.info("🔄 **Creando movimientos de ejemplo...**")
-                movimientos = {
-                    'metodo': 'ejemplo',
-                    'fecha_desde': fecha_desde.isoformat(),
-                    'fecha_hasta': fecha_hasta.isoformat(),
-                    'movimientos': [
-                        {
-                            'fechaOperacion': fecha_desde.isoformat(),
-                            'simbolo': 'GGAL',
-                            'tipo': 'compra',
-                            'cantidad': 100,
-                            'precio': 1500.50,
-                            'moneda': 'peso_Argentino',
-                            'descripcion': 'Compra de acciones Galicia',
-                            'valor': 150050.0,
-                            'estado': 'Aprobado',
-                            'tipoCuenta': 'inversion_Argentina_Pesos'
-                        },
-                        {
-                            'fechaOperacion': (fecha_desde + timedelta(days=5)).isoformat(),
-                            'simbolo': 'YPF',
-                            'tipo': 'venta',
-                            'cantidad': 50,
-                            'precio': 2800.75,
-                            'moneda': 'peso_Argentino',
-                            'descripcion': 'Venta de acciones YPF',
-                            'valor': 140037.5,
-                            'estado': 'Aprobado',
-                            'tipoCuenta': 'inversion_Argentina_Pesos'
-                        }
-                    ]
-                }
+                st.info("🔄 **Creando movimientos de ejemplo distribuidos en el período...**")
+                st.warning("⚠️ **Nota**: Los datos mostrados son de ejemplo debido a problemas de acceso a la API")
+                st.info("💡 **Para obtener datos reales, verifica:**")
+                st.info("• Permisos de asesor en tu cuenta IOL")
+                st.info("• Token de acceso válido")
+                st.info("• Conectividad con la API")
+                
+                # Crear movimientos de ejemplo más realistas usando la función mejorada
+                movimientos = crear_movimientos_ejemplo_para_clientes(
+                    clientes_seleccionados, 
+                    fecha_desde, 
+                    fecha_hasta,
+                    tipo_fecha,
+                    estado,
+                    tipo_operacion,
+                    moneda
+                )
             
             if movimientos and isinstance(movimientos, dict) and movimientos.get('movimientos'):
                 movimientos_lista = movimientos['movimientos']
@@ -6888,17 +7085,61 @@ def mostrar_movimientos_asesor():
                     if not df.empty:
                         st.success(f"✅ **Se encontraron {len(df)} movimientos** (Método: {movimientos.get('metodo', 'desconocido')})")
                         
+                        # Mostrar información adicional si es ejemplo
+                        if movimientos.get('metodo', '').startswith('ejemplo'):
+                            st.info("📊 **Datos de ejemplo generados para demostración**")
+                            if 'clientes_seleccionados' in movimientos:
+                                st.info(f"👥 **Clientes incluidos**: {len(movimientos['clientes_seleccionados'])} cliente(s)")
+                            if 'filtros_aplicados' in movimientos:
+                                filtros = movimientos['filtros_aplicados']
+                                st.info(f"🔍 **Filtros aplicados**: {', '.join([f'{k}={v}' for k, v in filtros.items() if v])}")
+                        
                         st.subheader("📋 Resultados de la búsqueda")
+                        
+                        # Mostrar desglose por cliente si hay información de cliente
+                        if 'clienteId' in df.columns or 'numeroCliente' in df.columns:
+                            col_cliente = 'clienteId' if 'clienteId' in df.columns else 'numeroCliente'
+                            if col_cliente in df.columns:
+                                st.subheader("👥 Desglose por Cliente")
+                                desglose_cliente = df[col_cliente].value_counts()
+                                col1, col2, col3 = st.columns(3)
+                                col1.metric("Total Clientes", len(desglose_cliente))
+                                col2.metric("Cliente con más movimientos", f"{desglose_cliente.index[0]} ({desglose_cliente.iloc[0]})")
+                                col3.metric("Promedio por cliente", f"{len(df) // len(desglose_cliente)}")
+                                
+                                # Mostrar tabla de desglose
+                                df_desglose = pd.DataFrame({
+                                    'Cliente ID': desglose_cliente.index,
+                                    'Movimientos': desglose_cliente.values,
+                                    'Porcentaje': (desglose_cliente.values / len(df) * 100).round(1)
+                                })
+                                st.dataframe(df_desglose, use_container_width=True)
                         
                         # Seleccionar columnas relevantes para mostrar
                         columnas_display = []
-                        for col in ['fechaOperacion', 'fechaLiquidacion', 'simbolo', 'tipo', 'cantidad', 'precio', 'moneda', 'estado', 'descripcion']:
+                        for col in ['clienteId', 'numeroCliente', 'fechaOperacion', 'fechaLiquidacion', 'simbolo', 'tipo', 'cantidad', 'precio', 'moneda', 'estado', 'descripcion']:
                             if col in df.columns:
                                 columnas_display.append(col)
                         
                         if columnas_display:
                             df_display = df[columnas_display].copy()
-                            df_display.columns = ['Fecha Operación', 'Fecha Liquidación', 'Símbolo', 'Tipo', 'Cantidad', 'Precio', 'Moneda', 'Estado', 'Descripción']
+                            
+                            # Mapear nombres de columnas para mostrar
+                            column_mapping = {
+                                'clienteId': 'Cliente ID',
+                                'numeroCliente': 'Número Cliente', 
+                                'fechaOperacion': 'Fecha Operación',
+                                'fechaLiquidacion': 'Fecha Liquidación',
+                                'simbolo': 'Símbolo',
+                                'tipo': 'Tipo',
+                                'cantidad': 'Cantidad',
+                                'precio': 'Precio',
+                                'moneda': 'Moneda',
+                                'estado': 'Estado',
+                                'descripcion': 'Descripción'
+                            }
+                            
+                            df_display.columns = [column_mapping.get(col, col) for col in columnas_display]
                             
                             # Formatear valores
                             if 'Precio' in df_display.columns:
@@ -6907,13 +7148,51 @@ def mostrar_movimientos_asesor():
                                 df_display['Cantidad'] = df_display['Cantidad'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "0")
                             
                             st.dataframe(df_display, use_container_width=True)
+                            
+                            # Agregar filtros adicionales para la visualización
+                            if 'Cliente ID' in df_display.columns or 'Número Cliente' in df_display.columns:
+                                st.subheader("🔍 Filtros de Visualización")
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    # Filtro por cliente
+                                    col_cliente_display = 'Cliente ID' if 'Cliente ID' in df_display.columns else 'Número Cliente'
+                                    clientes_disponibles = df_display[col_cliente_display].unique()
+                                    cliente_filtro = st.selectbox(
+                                        f"Filtrar por {col_cliente_display}",
+                                        options=['Todos'] + list(clientes_disponibles),
+                                        key="filtro_cliente_movimientos"
+                                    )
+                                
+                                with col2:
+                                    # Filtro por tipo de operación
+                                    if 'Tipo' in df_display.columns:
+                                        tipos_disponibles = df_display['Tipo'].unique()
+                                        tipo_filtro = st.selectbox(
+                                            "Filtrar por tipo",
+                                            options=['Todos'] + list(tipos_disponibles),
+                                            key="filtro_tipo_movimientos"
+                                        )
+                                    else:
+                                        tipo_filtro = 'Todos'
+                                
+                                # Aplicar filtros
+                                df_filtrado = df_display.copy()
+                                if cliente_filtro != 'Todos':
+                                    df_filtrado = df_filtrado[df_filtrado[col_cliente_display] == cliente_filtro]
+                                if tipo_filtro != 'Todos':
+                                    df_filtrado = df_filtrado[df_filtrado['Tipo'] == tipo_filtro]
+                                
+                                if len(df_filtrado) != len(df_display):
+                                    st.info(f"📊 **Mostrando {len(df_filtrado)} movimientos filtrados de {len(df_display)} totales**")
+                                    st.dataframe(df_filtrado, use_container_width=True)
                         else:
                             st.warning("⚠️ No se encontraron columnas relevantes para mostrar")
                             st.json(df.head())  # Mostrar datos crudos para debugging
                         
                         # Mostrar resumen
                         st.subheader("📊 Resumen de Movimientos")
-                        col1, col2, col3 = st.columns(3)
+                        col1, col2, col3, col4 = st.columns(4)
                         col1.metric("Total Movimientos", len(df))
                         
                         if 'precio' in df.columns and 'cantidad' in df.columns:
@@ -6930,6 +7209,12 @@ def mostrar_movimientos_asesor():
                             col3.metric("Estados", ", ".join([f"{k} ({v})" for k, v in estados.items()]))
                         else:
                             col3.metric("Estados", "N/A")
+                        
+                        if 'tipo' in df.columns:
+                            tipos = df['tipo'].value_counts().to_dict()
+                            col4.metric("Tipos", ", ".join([f"{k} ({v})" for k, v in tipos.items()]))
+                        else:
+                            col4.metric("Tipos", "N/A")
                             
                     else:
                         st.info("No se encontraron movimientos con los filtros seleccionados")
