@@ -6,7 +6,6 @@ from plotly.subplots import make_subplots
 from datetime import date, timedelta, datetime
 import numpy as np
 import time
-import pandas as pd
 import yfinance as yf
 import scipy.optimize as op
 from scipy import stats
@@ -14,6 +13,14 @@ import random
 import warnings
 import streamlit.components.v1 as components
 from scipy.stats import linregress
+
+# Importar SHDA para homebroker
+try:
+    import SHDA
+    SHDA_AVAILABLE = True
+except ImportError:
+    SHDA_AVAILABLE = False
+    st.warning("⚠️ SHDA no está instalado. Ejecuta: pip install SHDA==0.0.4rc4")
 
 warnings.filterwarnings('ignore')
 
@@ -772,7 +779,273 @@ def obtener_portafolio_alternativo(token_portador: str, pais: str):
         return None
 
 # ============================================================================
-# NUEVOS ENDPOINTS DE LA API
+# FUNCIONES DE HOMEBROKER (SHDA)
+# ============================================================================
+
+def conectar_homebroker(host, dni, user, password, comitente):
+    """Conecta al homebroker usando SHDA"""
+    if not SHDA_AVAILABLE:
+        st.error("❌ SHDA no está disponible. Instala con: pip install SHDA==0.0.4rc4")
+        return None
+    
+    try:
+        hb = SHDA.SHDA(host, dni, user, password)
+        st.success(f"✅ Conectado al homebroker (Host: {host}, Comitente: {comitente})")
+        return hb
+    except Exception as e:
+        st.error(f"❌ Error al conectar al homebroker: {str(e)}")
+        return None
+
+def obtener_posiciones_historicas(hb, comitente, fecha_inicio, fecha_fin):
+    """Obtiene posiciones históricas del homebroker"""
+    if not hb:
+        return None, None
+    
+    try:
+        # Generar lista de fechas dentro del período
+        fechas = pd.date_range(start=fecha_inicio, end=fecha_fin).strftime("%Y-%m-%d").tolist()
+        
+        # Obtener posiciones para cada fecha
+        posiciones = {}
+        with st.spinner("Obteniendo posiciones históricas..."):
+            for fecha in fechas:
+                try:
+                    posiciones[fecha] = hb.get_portfolio.by_date(comitente, fecha, "ARS")
+                    time.sleep(0.1)  # Pequeña pausa para evitar sobrecarga
+                except Exception as e:
+                    st.warning(f"⚠️ Error al obtener posiciones para {fecha}: {str(e)}")
+                    continue
+        
+        return posiciones, fechas
+    except Exception as e:
+        st.error(f"❌ Error al obtener posiciones históricas: {str(e)}")
+        return None, None
+
+def crear_grafico_distribucion(posiciones, fechas, fecha_inicio, fecha_fin):
+    """Crea gráfico de distribución de posiciones"""
+    if not posiciones or not fechas:
+        return None
+    
+    # Seleccionar fechas representativas
+    if len(fechas) >= 3:
+        fechas_pie = [fechas[0], fechas[len(fechas)//2], fechas[-1]]
+    else:
+        fechas_pie = fechas
+    
+    # Función para crear etiquetas
+    def crear_labels(pos):
+        return [f"{desc} ({pos_val})" for desc, pos_val in zip(pos["description"], pos["position"])]
+    
+    # Preparar datos
+    labels_list = [crear_labels(posiciones[fecha]) for fecha in fechas_pie]
+    values_list = [posiciones[fecha]["position"] for fecha in fechas_pie]
+    
+    # Crear figura
+    fig_pie = make_subplots(
+        rows=1, cols=len(fechas_pie),
+        specs=[[{'type':'domain'}]*len(fechas_pie)],
+        subplot_titles=[f"Posiciones ({fecha})" for fecha in fechas_pie]
+    )
+    
+    # Colores personalizados
+    colors = ['#636EFA', '#00CC96', '#FF6F61', '#F7B7A3', '#FF9900', '#AB63FA']
+    
+    # Agregar gráficos de torta
+    for i, (labels, values) in enumerate(zip(labels_list, values_list), start=1):
+        fig_pie.add_trace(
+            go.Pie(
+                labels=labels,
+                values=values,
+                name=f"Gráfico {i}",
+                textinfo='label+value',
+                textposition='outside',
+                marker=dict(colors=colors)
+            ),
+            row=1, col=i
+        )
+    
+    fig_pie.update_layout(
+        title_text=f"Distribución de Posiciones (Periodo: {fecha_inicio} a {fecha_fin})",
+        title_x=0.5,
+        title_font=dict(size=20, family="Arial, sans-serif", color="white"),
+        showlegend=False,
+        margin=dict(t=50, b=50, l=50, r=50),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)'
+    )
+    
+    return fig_pie
+
+def crear_grafico_evolucion(posiciones, fechas, fecha_inicio, fecha_fin):
+    """Crea gráfico de evolución de valores"""
+    if not posiciones or not fechas:
+        return None
+    
+    # Crear DataFrame
+    data = {
+        "categorias": fechas,
+        "serie_1": [posiciones[fecha]["position"].astype(float).sum() for fecha in fechas]
+    }
+    df = pd.DataFrame(data)
+    
+    # Calcular evolución porcentual
+    df["evolucion_pct"] = df["serie_1"].pct_change() * 100
+    df.loc[0, "evolucion_pct"] = 0
+    
+    # Crear subgráficos
+    fig_line = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        subplot_titles=(f"Valores Totales (Periodo: {fecha_inicio} a {fecha_fin})", "Evolución Porcentual")
+    )
+    
+    # Gráfico de valores totales
+    fig_line.add_trace(
+        go.Scatter(
+            x=df["categorias"],
+            y=df["serie_1"],
+            mode='lines+markers',
+            name="Valores Totales",
+            line=dict(color='#3b82f6', width=2),
+            marker=dict(size=8)
+        ),
+        row=1, col=1
+    )
+    
+    # Gráfico de evolución porcentual
+    fig_line.add_trace(
+        go.Scatter(
+            x=df["categorias"],
+            y=df["evolucion_pct"],
+            mode='lines+markers',
+            name="Evolución %",
+            line=dict(color='#ef4444', width=2),
+            marker=dict(size=8)
+        ),
+        row=2, col=1
+    )
+    
+    fig_line.update_layout(
+        title=f"Evolución de Valores y Porcentajes (Periodo: {fecha_inicio} a {fecha_fin})",
+        title_x=0.5,
+        xaxis_title="Fechas",
+        yaxis=dict(title="Valores", side="left"),
+        yaxis2=dict(title="Evolución %"),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(family="Arial, sans-serif", size=12, color="white"),
+        hovermode="x unified",
+        height=600,
+        margin=dict(l=50, r=50, t=80, b=50)
+    )
+    
+    return fig_line
+
+def mostrar_homebroker():
+    """Muestra la interfaz del homebroker"""
+    st.title("🏠 Homebroker - Análisis Histórico")
+    
+    if not SHDA_AVAILABLE:
+        st.error("❌ **SHDA no está disponible**")
+        st.info("💡 **Para instalar SHDA, ejecuta:**")
+        st.code("pip install SHDA==0.0.4rc4")
+        st.info("📝 **Nota:** SHDA es una biblioteca experimental para conectar con homebrokers argentinos")
+        return
+    
+    # Configuración de conexión
+    st.subheader("🔧 Configuración de Conexión")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        host = st.number_input("Host (Número de broker)", min_value=1, value=284, help="Ej: 284 es Veta")
+        dni = st.text_input("DNI", value="1111111", help="Tu DNI")
+    with col2:
+        user = st.text_input("Usuario", value="XXXXX", help="Tu usuario")
+        password = st.text_input("Contraseña", type="password", help="Tu contraseña")
+    
+    comitente = st.number_input("Número de Comitente", min_value=1, value=1111, help="Tu número de comitente")
+    
+    # Configuración de fechas
+    st.subheader("📅 Configuración de Fechas")
+    
+    use_today = st.checkbox("Usar 'Hoy' como fecha final", value=True, help="Si está marcado, solo define la fecha de inicio")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        fecha_inicio = st.date_input("Fecha de inicio", value=date.today() - timedelta(days=30))
+    with col2:
+        if not use_today:
+            fecha_fin = st.date_input("Fecha de fin", value=date.today())
+        else:
+            fecha_fin = date.today()
+            st.info(f"📅 Fecha final: {fecha_fin.strftime('%Y-%m-%d')}")
+    
+    # Botón para conectar y analizar
+    if st.button("🔍 Conectar y Analizar", type="primary", use_container_width=True):
+        if not all([host, dni, user, password, comitente]):
+            st.error("❌ Completa todos los campos de conexión")
+            return
+        
+        # Conectar al homebroker
+        hb = conectar_homebroker(host, dni, user, password, comitente)
+        if not hb:
+            return
+        
+        # Obtener posiciones históricas
+        posiciones, fechas = obtener_posiciones_historicas(hb, comitente, fecha_inicio, fecha_fin)
+        if not posiciones:
+            st.error("❌ No se pudieron obtener posiciones")
+            return
+        
+        st.success(f"✅ Se obtuvieron posiciones para {len(fechas)} fechas")
+        
+        # Mostrar resumen
+        st.subheader("📊 Resumen de Posiciones")
+        
+        # Última fecha disponible
+        ultima_fecha = max(fechas)
+        ultima_posicion = posiciones[ultima_fecha]
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("📅 Fechas analizadas", len(fechas))
+        col2.metric("📈 Activos en última fecha", len(ultima_posicion["description"]))
+        col3.metric("💰 Valor total último", f"${ultima_posicion['position'].astype(float).sum():,.2f}")
+        
+        # Gráfico de distribución
+        st.subheader("🥧 Distribución de Posiciones")
+        fig_pie = crear_grafico_distribucion(posiciones, fechas, fecha_inicio, fecha_fin)
+        if fig_pie:
+            st.plotly_chart(fig_pie, use_container_width=True)
+        
+        # Gráfico de evolución
+        st.subheader("📈 Evolución de Valores")
+        fig_line = crear_grafico_evolucion(posiciones, fechas, fecha_inicio, fecha_fin)
+        if fig_line:
+            st.plotly_chart(fig_line, use_container_width=True)
+        
+        # Tabla de posiciones actuales
+        st.subheader("📋 Posiciones Actuales")
+        if ultima_posicion:
+            df_posiciones = pd.DataFrame({
+                'Descripción': ultima_posicion["description"],
+                'Posición': ultima_posicion["position"],
+                'Valor': ultima_posicion["position"].astype(float)
+            })
+            
+            # Formatear valores
+            df_posiciones['Valor'] = df_posiciones['Valor'].apply(lambda x: f"${x:,.2f}")
+            
+            st.dataframe(df_posiciones, use_container_width=True)
+        
+        # Información adicional
+        st.info("""
+        💡 **Información del Homebroker:**
+        • Los datos provienen directamente de tu homebroker
+        • Las posiciones se obtienen para cada fecha del período
+        • Los gráficos muestran la evolución temporal de tus inversiones
+        • La distribución muestra cómo están repartidos tus activos
+        """)
+
 # ============================================================================
 
 def obtener_estado_cuenta_v2(token_portador):
@@ -7718,7 +7991,7 @@ def main():
             st.sidebar.markdown("---")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("Inicio", "Análisis de portafolio", "Gestión de operaciones"),
+                ("Inicio", "Análisis de portafolio", "Gestión de operaciones", "Homebroker"),
                 index=0,
                 key="menu_principal"
             )
@@ -7733,6 +8006,8 @@ def main():
                     st.info("Seleccione un cliente en la barra lateral para comenzar")
             elif opcion == "Gestión de operaciones":
                 mostrar_operaciones(token_acceso)
+            elif opcion == "Homebroker":
+                mostrar_homebroker()
         else:
             st.info("Ingrese sus credenciales para comenzar")
             
