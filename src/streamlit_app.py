@@ -15,6 +15,19 @@ import warnings
 import streamlit.components.v1 as components
 import matplotlib.pyplot as plt
 import time
+import seaborn as sns
+from streamlit_option_menu import option_menu
+import altair as alt
+from streamlit_aggrid import AgGrid, GridOptionsBuilder
+import streamlit_authenticator as stauth
+from streamlit_extras.metric_cards import style_metric_cards
+from streamlit_extras.colored_header import colored_header
+from streamlit_extras.dataframe_explorer import dataframe_explorer
+from streamlit_extras.app_logo import add_logo
+from streamlit_extras.badges import badge
+from streamlit_extras.let_it_rain import rain
+from streamlit_extras.stateful_button import button
+from streamlit_extras.switch_page_button import switch_page
 
 warnings.filterwarnings('ignore')
 
@@ -4075,16 +4088,21 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
 
 # --- Funciones de Visualización ---
 def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_cliente=None):
-    st.markdown("### 📈 Resumen del Portafolio")
+    # Header con diseño avanzado
+    colored_header(
+        label=f"📈 Análisis de Portafolio - {portfolio_id.upper()}" if portfolio_id else "📈 Análisis de Portafolio",
+        description="Análisis completo del portafolio de inversiones",
+        color_name="blue-70"
+    )
     
     # Mostrar información del cliente seleccionado
     if id_cliente:
         cliente_info = st.session_state.get('cliente_seleccionado', {})
         
-        # Información del cliente con diseño mejorado
-        st.markdown("#### 👤 Perfil del Cliente")
+        # Dashboard del cliente con métricas avanzadas
+        st.markdown("### 👤 Dashboard del Cliente")
         
-        # Métricas principales del cliente
+        # Métricas principales en cards estilizados
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
@@ -4102,82 +4120,65 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
         with col4:
             st.metric("📊 Portafolio", portfolio_id.upper() if portfolio_id else "General")
         
-        # Estado de cuenta del cliente
-        st.markdown("#### 💰 Estado de Cuenta")
+        # Aplicar estilos a las métricas
+        style_metric_cards(
+            background_color="#f0f2f6",
+            border_left_color="#1f77b4",
+            border_color="#1f77b4",
+            box_shadow="#f0f2f6"
+        )
         
-        # Métricas financieras principales
+        # Estado financiero en dashboard avanzado
+        st.markdown("### 💰 Estado Financiero")
+        
+        # Crear DataFrame para visualización avanzada
+        fin_data = {
+            'Métrica': ['Disponible ARS', 'Disponible USD', 'Total Portafolio', 'Total Cuenta'],
+            'Valor': [
+                cliente_info.get('disponibleOperarPesos', 0),
+                cliente_info.get('disponibleOperarDolares', 0),
+                cliente_info.get('totalPortafolio', 0),
+                cliente_info.get('totalCuentaValorizado', 0)
+            ],
+            'Moneda': ['ARS', 'USD', 'ARS', 'ARS'],
+            'Icono': ['💵', '💲', '📈', '💰']
+        }
+        
+        df_fin = pd.DataFrame(fin_data)
+        
+        # Métricas financieras con diseño mejorado
         col_fin1, col_fin2, col_fin3, col_fin4 = st.columns(4)
         
-        with col_fin1:
-            disponible_pesos = cliente_info.get('disponibleOperarPesos', 0)
-            st.metric(
-                "💵 Disponible ARS", 
-                f"AR$ {disponible_pesos:,.2f}",
-                help="Dinero disponible para operar en pesos argentinos"
-            )
+        for i, col in enumerate([col_fin1, col_fin2, col_fin3, col_fin4]):
+            with col:
+                valor = fin_data['Valor'][i]
+                moneda = fin_data['Moneda'][i]
+                icono = fin_data['Icono'][i]
+                metrica = fin_data['Métrica'][i]
+                
+                if moneda == 'USD':
+                    display_valor = f"USD {valor:,.2f}"
+                else:
+                    display_valor = f"AR$ {valor:,.2f}"
+                
+                st.metric(metrica, display_valor)
         
-        with col_fin2:
-            disponible_dolares = cliente_info.get('disponibleOperarDolares', 0)
-            st.metric(
-                "💲 Disponible USD", 
-                f"USD {disponible_dolares:,.2f}",
-                help="Dinero disponible para operar en dólares"
-            )
-        
-        with col_fin3:
-            total_portafolio = cliente_info.get('totalPortafolio', 0)
-            st.metric(
-                "📈 Total Portafolio", 
-                f"AR$ {total_portafolio:,.2f}",
-                help="Valor total del portafolio de inversiones"
-            )
-        
-        with col_fin4:
-            total_cuenta = cliente_info.get('totalCuentaValorizado', 0)
-            st.metric(
-                "💰 Total Cuenta", 
-                f"AR$ {total_cuenta:,.2f}",
-                help="Valor total de la cuenta valorizada"
-            )
-        
-        # Información adicional del cliente
-        st.markdown("#### 📋 Información Adicional")
-        
-        info_adicional = []
-        if cliente_info.get('email'):
-            info_adicional.append(f"📧 **Email:** {cliente_info.get('email')}")
-        if cliente_info.get('telefono'):
-            info_adicional.append(f"📞 **Teléfono:** {cliente_info.get('telefono')}")
-        if cliente_info.get('direccion'):
-            info_adicional.append(f"🏠 **Dirección:** {cliente_info.get('direccion')}")
-        if cliente_info.get('fechaAlta'):
-            info_adicional.append(f"📅 **Fecha Alta:** {cliente_info.get('fechaAlta')}")
-        if cliente_info.get('perfilInversor'):
-            perfil = cliente_info.get('perfilInversor')
-            color_perfil = {
-                'Conservador': '🟢',
-                'Moderado': '🟡', 
-                'Agresivo': '🔴'
-            }.get(perfil, '⚪')
-            info_adicional.append(f"🎯 **Perfil Inversor:** {color_perfil} {perfil}")
-        
-        if info_adicional:
-            col_info1, col_info2 = st.columns(2)
-            mitad = len(info_adicional) // 2 + len(info_adicional) % 2
-            
-            with col_info1:
-                for info in info_adicional[:mitad]:
-                    st.markdown(f"• {info}")
-            
-            with col_info2:
-                for info in info_adicional[mitad:]:
-                    st.markdown(f"• {info}")
-        
-        # Debug: Mostrar todos los campos disponibles (solo en desarrollo)
-        with st.expander("🔍 Información completa del cliente (Debug)"):
-            st.json(cliente_info)
-        
-        st.markdown("---")
+        # Gráfico de estado financiero
+        fig_fin = px.bar(
+            df_fin, 
+            x='Métrica', 
+            y='Valor',
+            color='Métrica',
+            title="Distribución del Capital",
+            color_discrete_sequence=px.colors.qualitative.Set3
+        )
+        fig_fin.update_layout(
+            height=400,
+            showlegend=False,
+            xaxis_title="Métricas Financieras",
+            yaxis_title="Valor"
+        )
+        st.plotly_chart(fig_fin, use_container_width=True)
     
     activos = portafolio.get('activos', [])
     datos_activos = []
@@ -4304,176 +4305,358 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
         portafolio_dict = {row['Símbolo']: row for row in datos_activos}
         metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
         
-        # Información General con diseño mejorado
-        st.markdown("#### 📊 Resumen General del Portafolio")
+        # Dashboard del portafolio con análisis avanzado
+        colored_header(
+            label="📊 Análisis del Portafolio",
+            description="Métricas clave y composición del portafolio",
+            color_name="violet-70"
+        )
         
-        cols = st.columns(4)
-        with cols[0]:
-            st.metric(
-                "📈 Total de Activos", 
-                len(datos_activos),
-                help="Cantidad total de activos en el portafolio"
-            )
-        with cols[1]:
-            st.metric(
-                "🔤 Símbolos Únicos", 
-                df_activos['Símbolo'].nunique(),
-                help="Número de símbolos diferentes en el portafolio"
-            )
-        with cols[2]:
-            st.metric(
-                "🏷️ Tipos de Activos", 
-                df_activos['Tipo'].nunique(),
-                help="Variedad de tipos de instrumentos"
-            )
-        with cols[3]:
-            st.metric(
-                "💰 Valor Total", 
-                f"AR$ {valor_total:,.2f}",
-                help="Valor total del portafolio en pesos argentinos"
-            )
+        # Métricas del portafolio con diseño avanzado
+        col_port1, col_port2, col_port3, col_port4 = st.columns(4)
+        
+        with col_port1:
+            st.metric("📈 Activos", len(datos_activos), help="Total de posiciones")
+        
+        with col_port2:
+            st.metric("🔤 Símbolos", df_activos['Símbolo'].nunique(), help="Instrumentos únicos")
+        
+        with col_port3:
+            st.metric("🏷️ Tipos", df_activos['Tipo'].nunique(), help="Categorías de activos")
+        
+        with col_port4:
+            st.metric("💰 Valor", f"AR$ {valor_total:,.0f}", help="Valor total")
+        
+        # Aplicar estilos a las métricas del portafolio
+        style_metric_cards(
+            background_color="#f0f2f6",
+            border_left_color="#ff7f0e",
+            border_color="#ff7f0e",
+            box_shadow="#f0f2f6"
+        )
         
         if metricas:
-            # Métricas de Riesgo
-            st.subheader("⚖️ Análisis de Riesgo")
-            cols = st.columns(3)
+            # Dashboard de Riesgo y Rendimiento
+            colored_header(
+                label="⚖️ Análisis de Riesgo y Rendimiento",
+                description="Evaluación integral del riesgo y proyecciones",
+                color_name="red-70"
+            )
             
-            # Mostrar concentración como porcentaje
-            concentracion_pct = metricas['concentracion'] * 100
-            cols[0].metric("Concentración", 
-                         f"{concentracion_pct:.2f}%",
-                         help="Índice de Herfindahl normalizado: 0%=muy diversificado, 100%=muy concentrado")
+            # Crear tabs para organizar la información
+            tab_riesgo, tab_rendimiento, tab_probabilidades = st.tabs(["🎯 Riesgo", "📈 Rendimiento", "🎲 Probabilidades"])
             
-            # Mostrar volatilidad como porcentaje anual
-            volatilidad_pct = metricas['std_dev_activo'] * 100
-            cols[1].metric("Volatilidad Anual", 
-                         f"{volatilidad_pct:.2f}%",
-                         help="Riesgo medido como desviación estándar de retornos anuales")
-            
-            # Nivel de concentración con colores
-            if metricas['concentracion'] < 0.3:
-                concentracion_status = "🟢 Baja"
-            elif metricas['concentracion'] < 0.6:
-                concentracion_status = "🟡 Media"
-            else:
-                concentracion_status = "🔴 Alta"
+            with tab_riesgo:
+                col_riesgo1, col_riesgo2, col_riesgo3 = st.columns(3)
                 
-            cols[2].metric("Nivel Concentración", concentracion_status)
+                # Concentración
+                concentracion_pct = metricas['concentracion'] * 100
+                if metricas['concentracion'] < 0.3:
+                    concentracion_status = "🟢 Baja"
+                    concentracion_color = "green"
+                elif metricas['concentracion'] < 0.6:
+                    concentracion_status = "🟡 Media"
+                    concentracion_color = "orange"
+                else:
+                    concentracion_status = "🔴 Alta"
+                    concentracion_color = "red"
+                
+                col_riesgo1.metric(
+                    "Concentración", 
+                    f"{concentracion_pct:.2f}%",
+                    help="Índice de Herfindahl: 0%=diversificado, 100%=concentrado"
+                )
+                
+                # Volatilidad
+                volatilidad_pct = metricas['std_dev_activo'] * 100
+                col_riesgo2.metric(
+                    "Volatilidad Anual", 
+                    f"{volatilidad_pct:.2f}%",
+                    help="Riesgo medido como desviación estándar"
+                )
+                
+                # Nivel de concentración
+                col_riesgo3.metric("Nivel", concentracion_status)
+                
+                # Gráfico de riesgo
+                riesgo_data = {
+                    'Métrica': ['Concentración', 'Volatilidad'],
+                    'Valor': [concentracion_pct, volatilidad_pct],
+                    'Color': ['#ff6b6b', '#4ecdc4']
+                }
+                
+                fig_riesgo = px.bar(
+                    pd.DataFrame(riesgo_data),
+                    x='Métrica',
+                    y='Valor',
+                    color='Métrica',
+                    title="Perfil de Riesgo",
+                    color_discrete_sequence=['#ff6b6b', '#4ecdc4']
+                )
+                fig_riesgo.update_layout(height=300, showlegend=False)
+                st.plotly_chart(fig_riesgo, use_container_width=True)
             
-            # Proyecciones
-            st.subheader("📈 Proyecciones de Rendimiento")
-            cols = st.columns(3)
+            with tab_rendimiento:
+                col_rend1, col_rend2, col_rend3 = st.columns(3)
+                
+                # Retorno esperado
+                retorno_anual_pct = metricas['retorno_esperado_anual'] * 100
+                col_rend1.metric(
+                    "Retorno Esperado", 
+                    f"{retorno_anual_pct:+.2f}%",
+                    help="Retorno anual esperado"
+                )
+                
+                # Escenarios
+                optimista_pct = (metricas['pl_esperado_max'] / valor_total) * 100 if valor_total > 0 else 0
+                pesimista_pct = (metricas['pl_esperado_min'] / valor_total) * 100 if valor_total > 0 else 0
+                
+                col_rend2.metric("Optimista (95%)", f"{optimista_pct:+.2f}%")
+                col_rend3.metric("Pesimista (5%)", f"{pesimista_pct:+.2f}%")
+                
+                # Gráfico de escenarios
+                escenarios_data = {
+                    'Escenario': ['Optimista', 'Esperado', 'Pesimista'],
+                    'Retorno (%)': [optimista_pct, retorno_anual_pct, pesimista_pct],
+                    'Color': ['#2ecc71', '#3498db', '#e74c3c']
+                }
+                
+                fig_escenarios = px.bar(
+                    pd.DataFrame(escenarios_data),
+                    x='Escenario',
+                    y='Retorno (%)',
+                    color='Escenario',
+                    title="Escenarios de Rendimiento",
+                    color_discrete_sequence=['#2ecc71', '#3498db', '#e74c3c']
+                )
+                fig_escenarios.update_layout(height=300, showlegend=False)
+                st.plotly_chart(fig_escenarios, use_container_width=True)
             
-            # Mostrar retornos como porcentaje
-            retorno_anual_pct = metricas['retorno_esperado_anual'] * 100
-            cols[0].metric("Retorno Esperado Anual", 
-                         f"{retorno_anual_pct:+.2f}%",
-                         help="Retorno anual esperado basado en datos históricos")
-            
-            # Mostrar escenarios como porcentaje
-            optimista_pct = (metricas['pl_esperado_max'] / valor_total) * 100 if valor_total > 0 else 0
-            pesimista_pct = (metricas['pl_esperado_min'] / valor_total) * 100 if valor_total > 0 else 0
-            
-            cols[1].metric("Escenario Optimista (95%)", 
-                         f"{optimista_pct:+.2f}%",
-                         help="Mejor escenario con 95% de confianza")
-            cols[2].metric("Escenario Pesimista (5%)", 
-                         f"{pesimista_pct:+.2f}%",
-                         help="Peor escenario con 5% de confianza")
-            
-            # Probabilidades
-            st.subheader("🎯 Probabilidades")
-            cols = st.columns(4)
-            probs = metricas['probabilidades']
-            cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
-            cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
-            cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
-            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}%")
+            with tab_probabilidades:
+                probs = metricas['probabilidades']
+                
+                col_prob1, col_prob2, col_prob3, col_prob4 = st.columns(4)
+                
+                col_prob1.metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
+                col_prob2.metric("Pérdida", f"{probs['perdida']*100:.1f}%")
+                col_prob3.metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
+                col_prob4.metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}%")
+                
+                # Gráfico de probabilidades
+                prob_data = {
+                    'Categoría': ['Ganancia', 'Pérdida', 'Ganancia >10%', 'Pérdida >10%'],
+                    'Probabilidad (%)': [
+                        probs['ganancia']*100,
+                        probs['perdida']*100,
+                        probs['ganancia_mayor_10']*100,
+                        probs['perdida_mayor_10']*100
+                    ]
+                }
+                
+                fig_probs = px.pie(
+                    pd.DataFrame(prob_data),
+                    values='Probabilidad (%)',
+                    names='Categoría',
+                    title="Distribución de Probabilidades",
+                    color_discrete_sequence=px.colors.qualitative.Set3
+                )
+                fig_probs.update_layout(height=400)
+                st.plotly_chart(fig_probs, use_container_width=True)
         
-        # Gráficos
-        st.subheader("📊 Distribución de Activos")
-        col1, col2 = st.columns(2)
+        # Visualizaciones del Portafolio
+        colored_header(
+            label="📊 Visualizaciones del Portafolio",
+            description="Análisis visual de la composición y distribución",
+            color_name="green-70"
+        )
         
-        with col1:
+        # Tabs para organizar las visualizaciones
+        tab_composicion, tab_distribucion, tab_analisis = st.tabs(["🥧 Composición", "📈 Distribución", "📋 Análisis"])
+        
+        with tab_composicion:
+            # Gráfico de composición por tipo de activo
             if 'Tipo' in df_activos.columns and df_activos['Valuación'].sum() > 0:
                 tipo_stats = df_activos.groupby('Tipo')['Valuación'].sum().reset_index()
-                fig_pie = go.Figure(data=[go.Pie(
-                    labels=tipo_stats['Tipo'],
-                    values=tipo_stats['Valuación'],
-                    textinfo='label+percent',
-                    hole=0.4,
-                    marker=dict(colors=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
-                )])
+                
+                # Gráfico de torta mejorado
+                fig_pie = px.pie(
+                    tipo_stats,
+                    values='Valuación',
+                    names='Tipo',
+                    title="Composición por Tipo de Activo",
+                    color_discrete_sequence=px.colors.qualitative.Set3
+                )
+                fig_pie.update_traces(
+                    textposition='inside',
+                    textinfo='percent+label',
+                    hovertemplate='<b>%{label}</b><br>Valor: AR$ %{value:,.0f}<br>Porcentaje: %{percent}<extra></extra>'
+                )
                 fig_pie.update_layout(
-                    title="Distribución por Tipo",
-                    height=400
+                    height=500,
+                    showlegend=True,
+                    legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.01)
                 )
                 st.plotly_chart(fig_pie, use_container_width=True)
+                
+                # Gráfico de barras complementario
+                fig_bars = px.bar(
+                    tipo_stats,
+                    x='Tipo',
+                    y='Valuación',
+                    title="Valor por Tipo de Activo",
+                    color='Valuación',
+                    color_continuous_scale='viridis'
+                )
+                fig_bars.update_traces(
+                    texttemplate='AR$ %{y:,.0f}',
+                    textposition='outside'
+                )
+                fig_bars.update_layout(
+                    height=400,
+                    xaxis_title="Tipo de Activo",
+                    yaxis_title="Valor (AR$)",
+                    showlegend=False
+                )
+                st.plotly_chart(fig_bars, use_container_width=True)
         
-        with col2:
+        with tab_distribucion:
+            # Histograma de distribución de valores
             if len(datos_activos) > 1:
                 valores_activos = [a['Valuación'] for a in datos_activos if a['Valuación'] > 0]
                 if valores_activos:
-                    fig_hist = go.Figure(data=[go.Histogram(
+                    fig_hist = px.histogram(
                         x=valores_activos,
-                        nbinsx=min(20, len(valores_activos)),
-                        marker_color='#0d6efd'
-                    )])
+                        nbins=min(20, len(valores_activos)),
+                        title="Distribución de Valores de Activos",
+                        labels={'x': 'Valor (AR$)', 'y': 'Frecuencia'},
+                        color_discrete_sequence=['#3498db']
+                    )
                     fig_hist.update_layout(
-                        title="Distribución de Valores",
-                        xaxis_title="Valor ($)",
+                        height=500,
+                        xaxis_title="Valor del Activo (AR$)",
                         yaxis_title="Frecuencia",
-                        height=400
+                        showlegend=False
                     )
                     st.plotly_chart(fig_hist, use_container_width=True)
+                    
+                    # Box plot para análisis estadístico
+                    fig_box = px.box(
+                        y=valores_activos,
+                        title="Análisis Estadístico de Valores",
+                        labels={'y': 'Valor (AR$)'}
+                    )
+                    fig_box.update_layout(
+                        height=400,
+                        yaxis_title="Valor del Activo (AR$)",
+                        showlegend=False
+                    )
+                    st.plotly_chart(fig_box, use_container_width=True)
         
-        # Tabla de activos
-        st.subheader("📋 Detalle de Activos")
-        df_display = df_activos.copy()
+        with tab_analisis:
+            # Tabla interactiva con AgGrid
+            if len(df_activos) > 0:
+                # Preparar datos para la tabla
+                df_display = df_activos.copy()
+                df_display['Peso (%)'] = (df_display['Valuación'] / valor_total * 100).round(2)
+                df_display['Valuación'] = df_display['Valuación'].apply(lambda x: f"AR$ {x:,.2f}")
+                
+                # Configurar AgGrid
+                gb = GridOptionsBuilder.from_dataframe(df_display)
+                gb.configure_pagination(paginationAutoPageSize=True)
+                gb.configure_side_bar()
+                gb.configure_default_column(
+                    groupable=True,
+                    value=True,
+                    enableRowGroup=True,
+                    aggFunc='sum',
+                    editable=True
+                )
+                gb.configure_column("Símbolo", pinned="left")
+                gb.configure_column("Valuación", type=["numericColumn", "numberColumnFilter", "customNumericFormat"], precision=2)
+                
+                gridOptions = gb.build()
+                
+                st.markdown("### 📋 Tabla Detallada de Activos")
+                AgGrid(
+                    df_display,
+                    gridOptions=gridOptions,
+                    data_return_mode='AS_INPUT',
+                    update_mode='MODEL_CHANGED',
+                    fit_columns_on_grid_load=True,
+                    theme='alpine'
+                )
         
-        # Verificar que df_activos tenga la columna 'Valuación'
-        if 'Valuación' not in df_display.columns:
-            st.error("❌ Error: No se encontró la columna 'Valuación' en los datos del portafolio")
-            return
-        
-        # Verificar que valor_total sea válido
-        if valor_total <= 0:
-            st.error("❌ Error: El valor total del portafolio debe ser mayor a 0")
-            return
-        
-        df_display['Valuación'] = df_display['Valuación'].apply(
-            lambda x: f"${x:,.2f}" if x > 0 else "N/A"
-        )
-        
-        # Crear columna de peso con validación
-        try:
-            df_display['Peso (%)'] = (df_activos['Valuación'] / valor_total * 100).round(2)
-            df_display = df_display.sort_values('Peso (%)', ascending=False)
-        except Exception as e:
-            st.error(f"❌ Error calculando pesos: {str(e)}")
-            # Crear columna de peso con valores por defecto
-            df_display['Peso (%)'] = 0.0
-        
-        st.dataframe(df_display, use_container_width=True, height=400)
-        
-        # Estadísticas detalladas y distribuciones
-        with st.expander("📊 Estadísticas Detalladas y Distribuciones", expanded=False):
-            # Opción para mostrar histograma de retornos
-            mostrar_histograma_retornos = st.checkbox(
-                "📈 Mostrar Histograma de Retornos por Activo", 
-                value=False,
-                help="Muestra histogramas de retornos históricos para cada activo del portafolio",
-                key=f"mostrar_histograma_retornos_detallado_{portfolio_id}"
-            )
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("#### 📈 Estadísticas Descriptivas")
-                if len(datos_activos) > 0:
-                    valores = [a['Valuación'] for a in datos_activos if a['Valuación'] > 0]
-                    if valores:
-                        # Cache de cálculos estadísticos
+    else:
+        st.warning("No se encontraron activos en el portafolio")
+
+def mostrar_estado_cuenta(estado_cuenta, es_eeuu=False):
+    """
+    Muestra el estado de cuenta, con soporte para cuentas filtradas de EEUU
+    
+    Args:
+        estado_cuenta (dict): Datos del estado de cuenta
+        es_eeuu (bool): Si es True, muestra información específica para cuentas de EEUU
+    """
+    if es_eeuu:
+        st.markdown("### 🇺🇸 Estado de Cuenta EEUU")
+    else:
+        st.markdown("### 💰 Estado de Cuenta")
+    
+    if not estado_cuenta:
+        st.warning("No hay datos de estado de cuenta disponibles")
+        return
+
+def mostrar_analisis_portafolio():
+    cliente = st.session_state.cliente_seleccionado
+    token_acceso = st.session_state.token_acceso
+
+    if not cliente:
+        st.error("No se ha seleccionado ningún cliente")
+        return
+
+    id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+    nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
+
+    st.title(f"Análisis de Portafolio - {nombre_cliente}")
+    
+    # Cargar datos una sola vez y cachearlos
+    @st.cache_data(ttl=300)  # Cache por 5 minutos
+    def cargar_datos_cliente(token, cliente_id):
+        """Carga y cachea los datos del cliente para evitar llamadas repetitivas"""
+        portafolio_ar = obtener_portafolio(token, cliente_id, 'Argentina')
+        portafolio_eeuu = obtener_portafolio_eeuu(token, cliente_id)
+        estado_cuenta_ar = obtener_estado_cuenta(token, cliente_id)
+        estado_cuenta_eeuu = obtener_estado_cuenta_eeuu(token)
+        return portafolio_ar, portafolio_eeuu, estado_cuenta_ar, estado_cuenta_eeuu
+    
+    # Cargar datos con cache
+    with st.spinner("🔄 Cargando datos del cliente..."):
+        portafolio_ar, portafolio_eeuu, estado_cuenta_ar, estado_cuenta_eeuu = cargar_datos_cliente(token_acceso, id_cliente)
+    
+    # Crear tabs con iconos
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "🇦🇷 Portafolio Argentina", 
+        "🇺🇸 Portafolio EEUU",
+        "💰 Estado de Cuenta", 
+        "🎯 Optimización y Cobertura",
+        "📊 Análisis Técnico",
+        "💱 Cotizaciones",
+        "📈 Operaciones Reales"
+    ])
+
+    with tab1:
+        if portafolio_ar:
+            st.subheader("🇦🇷 Portafolio Argentina")
+            mostrar_resumen_portafolio(portafolio_ar, token_acceso, "ar", id_cliente)
+        else:
+            st.warning("No se pudo obtener el portafolio de Argentina")
+    
+    with tab2:
+        if portafolio_eeuu:
+            st.subheader("🇺🇸 Portafolio Estados Unidos")
+            mostrar_resumen_portafolio(portafolio_eeuu, token_acceso, "eeuu", id_cliente)
+        else:
+            st.warning("No se pudo obtener el portafolio de EEUU")
                         @st.cache_data(ttl=300)
                         def calcular_estadisticas(valores_list):
                             """Calcula estadísticas con cache para mejor rendimiento"""
