@@ -1732,11 +1732,11 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                                 simbolos_exitosos.append(simbolo)
                                 serie_encontrada = True
                                 mercado_encontrado = mercado
-                            
-                            # Mostrar información del símbolo exitoso
-                            if len(simbolos_exitosos) <= 10:
-                                st.success(f"✅ {simbolo} ({mercado}): {len(serie)} puntos de datos")
-                            break
+                                
+                                # Mostrar información del símbolo exitoso
+                                if len(simbolos_exitosos) <= 10:
+                                    st.success(f"✅ {simbolo} ({mercado}): {len(serie)} puntos de datos")
+                                break
                         
                 except Exception as e:
                     continue
@@ -1835,28 +1835,28 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                 df_precios_filled = df_precios.fillna(method='ffill').fillna(method='bfill')
                 
                 if not df_precios_filled.dropna().empty and len(df_precios_filled.dropna()) >= 30:
-                    df_precios = df_precios_filled.dropna()
-                    st.info("✅ Usando estrategia forward/backward fill")
+                df_precios = df_precios_filled.dropna()
+                st.info("✅ Usando estrategia forward/backward fill")
                 else:
                     # Estrategia 3: Interpolar valores faltantes
                     df_precios_interpolated = df_precios.interpolate(method='time')
                     
                     if not df_precios_interpolated.dropna().empty and len(df_precios_interpolated.dropna()) >= 30:
-                        df_precios = df_precios_interpolated.dropna()
-                        st.info("✅ Usando estrategia de interpolación")
-                    else:
+                df_precios = df_precios_interpolated.dropna()
+                st.info("✅ Usando estrategia de interpolación")
+            else:
                         # Estrategia 4: Usar cualquier dato disponible
-                        df_precios = df_precios.dropna()
+                df_precios = df_precios.dropna()
                         if df_precios.empty:
                             st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
                             return None, None, None
                         else:
                             st.warning(f"⚠️ Usando datos limitados: {len(df_precios)} observaciones")
-            
-            if df_precios.empty:
-                st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
-                return None, None, None
-                
+        
+        if df_precios.empty:
+            st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
+            return None, None, None
+        
         except Exception as e:
             st.error(f"❌ Error al alinear datos: {str(e)}")
             return None, None, None
@@ -3161,7 +3161,8 @@ def dataframe_correlacion_beta(benchmark, position_security, hedge_universe, tok
             )
             
             if returns is not None and not returns.empty:
-                return returns
+                # Continuar con el procesamiento
+                pass
             else:
                 # No hay fallback - solo usar IOL
                 st.error("No se pudieron obtener datos históricos de IOL")
@@ -4779,17 +4780,17 @@ def mostrar_estado_cuenta(estado_cuenta):
         cuentas_unicas[clave_unica] = cuenta
     
     numero_cuentas_unicas = len(cuentas_unicas)
-    
-    cols = st.columns(3)
+        
+        cols = st.columns(3)
     cols[0].metric("Total en Pesos", f"AR$ {total_en_pesos:,.2f}")
     cols[1].metric("Número de Cuentas", numero_cuentas_unicas)
     cols[2].metric("Total de Registros", len(cuentas))
-    
-    if cuentas:
-        st.subheader("📊 Detalle de Cuentas")
         
-        datos_cuentas = []
-        for cuenta in cuentas:
+        if cuentas:
+        st.subheader("📊 Detalle de Cuentas")
+            
+            datos_cuentas = []
+            for cuenta in cuentas:
             # Obtener valores y validar coherencia
             disponible = float(cuenta.get('disponible', 0))
             saldo = float(cuenta.get('saldo', 0))
