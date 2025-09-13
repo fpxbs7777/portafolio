@@ -8031,7 +8031,7 @@ def obtener_datos_benchmark_argentino(benchmark, token_acceso, fecha_desde, fech
                         return pd.DataFrame({benchmark: retornos_bono}, index=fechas)
                 
                 # Fallback a método anterior
-                datos_bono = obtener_serie_historica_iol(token_acceso, 'BONOS', simbolo_bono, fecha_desde, fecha_hasta)
+                datos_bono = obtener_serie_historica_iol(token_acceso, 'BONOS', simbolo_bono, fecha_desde, fecha_hasta, 'SinAjustar')
                 if datos_bono is not None and not datos_bono.empty:
                     retornos = datos_bono['close'].pct_change().dropna()
                     return pd.DataFrame({benchmark: retornos})
@@ -8059,7 +8059,7 @@ def obtener_datos_benchmark_argentino(benchmark, token_acceso, fecha_desde, fech
                         return pd.DataFrame({benchmark: retornos_indice}, index=fechas)
                 
                 # Fallback a método anterior
-                datos_indice = obtener_serie_historica_iol(token_acceso, 'INDICES', nombre_indice, fecha_desde, fecha_hasta)
+                datos_indice = obtener_serie_historica_iol(token_acceso, 'INDICES', nombre_indice, fecha_desde, fecha_hasta, 'SinAjustar')
                 if datos_indice is not None and not datos_indice.empty:
                     retornos = datos_indice['close'].pct_change().dropna()
                     return pd.DataFrame({benchmark: retornos})
@@ -8998,6 +8998,7 @@ def calcular_frontera_interactiva(manager_inst, calcular_todos=True, incluir_act
 def obtener_movimientos_reales(access_token, id_cliente=None, fecha_desde=None, fecha_hasta=None):
     """
     Obtiene los movimientos/operaciones de la cuenta usando la API de InvertirOnline
+    Si la API falla, intenta usar scraping de la página web como fallback
     
     Args:
         access_token (str): Token de acceso para la autenticación
@@ -9008,6 +9009,7 @@ def obtener_movimientos_reales(access_token, id_cliente=None, fecha_desde=None, 
     Returns:
         list: Lista de operaciones/movimientos de la cuenta
     """
+    # Primero intentar con la API
     url = 'https://api.invertironline.com/api/v2/operaciones'
     
     headers = {
@@ -9033,7 +9035,7 @@ def obtener_movimientos_reales(access_token, id_cliente=None, fecha_desde=None, 
         
         if response.status_code == 200:
             operaciones = response.json()
-            st.success(f"📊 Se obtuvieron {len(operaciones)} operaciones")
+            st.success(f"📊 Se obtuvieron {len(operaciones)} operaciones via API")
             
             # Mostrar información de debug
             if operaciones:
@@ -9044,13 +9046,455 @@ def obtener_movimientos_reales(access_token, id_cliente=None, fecha_desde=None, 
             
             return operaciones
         else:
-            st.error(f'Error en la solicitud: {response.status_code}')
-            st.error(f'Respuesta: {response.text}')
-            return None
+            st.warning(f"⚠️ API falló con código {response.status_code}, intentando scraping...")
+            # Fallback a scraping básico primero
+            operaciones = obtener_operaciones_via_scraping(access_token, id_cliente, fecha_desde, fecha_hasta)
+            if not operaciones:
+                # Si el scraping básico falla, intentar scraping avanzado
+                st.info("🔍 Scraping básico falló, intentando scraping avanzado...")
+                return obtener_operaciones_via_scraping_avanzado(access_token, id_cliente, fecha_desde, fecha_hasta)
+            return operaciones
             
     except requests.exceptions.RequestException as e:
-        st.error(f'Error en la conexión: {e}')
-        return None
+        st.warning(f"⚠️ Error en API: {e}, intentando scraping...")
+        # Fallback a scraping básico primero
+        operaciones = obtener_operaciones_via_scraping(access_token, id_cliente, fecha_desde, fecha_hasta)
+        if not operaciones:
+            # Si el scraping básico falla, intentar scraping avanzado
+            st.info("🔍 Scraping básico falló, intentando scraping avanzado...")
+            return obtener_operaciones_via_scraping_avanzado(access_token, id_cliente, fecha_desde, fecha_hasta)
+        return operaciones
+
+def obtener_operaciones_via_scraping(access_token, id_cliente=None, fecha_desde=None, fecha_hasta=None):
+    """
+    Obtiene operaciones mediante scraping de la página web de IOL
+    como fallback cuando la API no funciona. Simula el envío del formulario con filtros.
+    
+    Args:
+        access_token (str): Token de acceso para la autenticación
+        id_cliente (str): ID del cliente para filtrar operaciones (opcional)
+        fecha_desde (str): Fecha desde en formato YYYY-MM-DD (opcional)
+        fecha_hasta (str): Fecha hasta en formato YYYY-MM-DD (opcional)
+    
+    Returns:
+        list: Lista de operaciones obtenidas via scraping
+    """
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+        import re
+        from datetime import datetime
+        
+        st.info("🔍 Intentando obtener operaciones via scraping con filtros...")
+        
+        # URL base de la página de operaciones
+        url = 'https://afi.invertironline.com/cliente-operaciones'
+        
+        # Headers para simular un navegador
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'es-AR,es;q=0.8,en-US;q=0.5,en;q=0.3',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Authorization': f'Bearer {access_token}',
+            'Referer': 'https://afi.invertironline.com/cliente-operaciones'
+        }
+        
+        # Primero obtener la página para extraer tokens CSRF si existen
+        session = requests.Session()
+        response = session.get(url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Buscar tokens CSRF o campos hidden
+            csrf_token = None
+            csrf_input = soup.find('input', {'name': '_token'}) or soup.find('input', {'name': 'csrf_token'})
+            if csrf_input:
+                csrf_token = csrf_input.get('value')
+            
+            # Preparar datos del formulario
+            form_data = {
+                'status': 'Todas',  # Por defecto todas las operaciones
+                'country': 'argentina',  # País por defecto
+                'singleDay': 'false'  # Buscar en rango de fechas
+            }
+            
+            # Agregar fechas si se proporcionan
+            if fecha_desde:
+                form_data['dateFrom'] = fecha_desde
+            if fecha_hasta:
+                form_data['dateTo'] = fecha_hasta
+            
+            # Agregar cliente si se especifica
+            if id_cliente:
+                form_data['customer'] = str(id_cliente)
+            
+            # Agregar token CSRF si existe
+            if csrf_token:
+                form_data['_token'] = csrf_token
+            
+            # Headers para el POST
+            headers_post = headers.copy()
+            headers_post.update({
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-Requested-With': 'XMLHttpRequest'
+            })
+            
+            # Intentar enviar el formulario (simulación)
+            try:
+                # En lugar de enviar el formulario, buscar la tabla directamente
+                # ya que la página puede cargar los datos dinámicamente
+                st.info("🔍 Buscando tabla de operaciones en la página...")
+                
+                # Buscar la tabla de operaciones
+                tabla_operaciones = soup.find('table', class_='ant-table-tbody') or soup.find('table')
+                
+                if tabla_operaciones and not tabla_operaciones.find('tr', class_='ant-table-placeholder'):
+                    operaciones = []
+                    filas = tabla_operaciones.find_all('tr')
+                    
+                    for fila in filas:
+                        celdas = fila.find_all('td')
+                        
+                        if len(celdas) >= 9:  # Verificar que tenga todas las columnas
+                            # Extraer datos según la estructura de la tabla:
+                            # C.C., Nº trans./Fecha orden, Tipo, Símbolo, Cant./Monto, Cant. operada, Precio operado, Monto operado, Estado
+                            cc = celdas[0].get_text(strip=True) if len(celdas) > 0 else ''
+                            numero_fecha = celdas[1].get_text(strip=True) if len(celdas) > 1 else ''
+                            tipo = celdas[2].get_text(strip=True) if len(celdas) > 2 else ''
+                            simbolo = celdas[3].get_text(strip=True) if len(celdas) > 3 else ''
+                            cantidad_monto = celdas[4].get_text(strip=True) if len(celdas) > 4 else ''
+                            cantidad_operada = celdas[5].get_text(strip=True) if len(celdas) > 5 else ''
+                            precio_operado = celdas[6].get_text(strip=True) if len(celdas) > 6 else ''
+                            monto_operado = celdas[7].get_text(strip=True) if len(celdas) > 7 else ''
+                            estado = celdas[8].get_text(strip=True) if len(celdas) > 8 else ''
+                            
+                            # Separar número de orden y fecha
+                            numero_orden = ''
+                            fecha_orden = ''
+                            if numero_fecha:
+                                partes = numero_fecha.split('\n')
+                                if len(partes) >= 2:
+                                    numero_orden = partes[0].strip()
+                                    fecha_orden = partes[1].strip()
+                                else:
+                                    numero_orden = numero_fecha
+                            
+                            # Convertir datos a formato esperado
+                            operacion = {
+                                'numero': numero_orden,
+                                'fechaOrden': fecha_orden,
+                                'tipo': tipo,
+                                'simbolo': simbolo,
+                                'cantidad': float(cantidad_operada.replace(',', '.')) if cantidad_operada and cantidad_operada != '-' else 0,
+                                'precio': float(precio_operado.replace(',', '.')) if precio_operado and precio_operado != '-' else 0,
+                                'monto': float(monto_operado.replace(',', '.')) if monto_operado and monto_operado != '-' else 0,
+                                'estado': estado.lower() if estado else 'terminada',
+                                'fechaOperada': fecha_orden,
+                                'cantidadOperada': float(cantidad_operada.replace(',', '.')) if cantidad_operada and cantidad_operada != '-' else 0,
+                                'precioOperado': float(precio_operado.replace(',', '.')) if precio_operado and precio_operado != '-' else 0,
+                                'montoOperado': float(monto_operado.replace(',', '.')) if monto_operado and monto_operado != '-' else 0,
+                                'cc': cc
+                            }
+                            
+                            # Filtrar por cliente si se especifica
+                            if not id_cliente or str(id_cliente) in cc or str(id_cliente) in numero_orden:
+                                operaciones.append(operacion)
+                    
+                    if operaciones:
+                        st.success(f"📊 Se obtuvieron {len(operaciones)} operaciones via scraping")
+                        
+                        # Mostrar información de debug
+                        simbolos_encontrados = list(set([op.get('simbolo', 'N/A') for op in operaciones]))
+                        st.info(f"🔍 Símbolos encontrados via scraping: {simbolos_encontrados}")
+                        
+                        return operaciones
+                    else:
+                        st.warning("⚠️ No se encontraron operaciones en la tabla")
+                        return []
+                else:
+                    st.warning("⚠️ La tabla de operaciones está vacía o no se encontró")
+                    return []
+                    
+            except Exception as form_error:
+                st.warning(f"⚠️ Error procesando formulario: {form_error}")
+                return []
+                
+        else:
+            st.error(f"❌ Error al acceder a la página: {response.status_code}")
+            return []
+            
+    except ImportError:
+        st.error("❌ Error: Se requiere BeautifulSoup4 para el scraping. Instalar con: pip install beautifulsoup4")
+        return []
+    except Exception as e:
+        st.error(f"❌ Error en scraping: {str(e)}")
+        return []
+
+def obtener_movimientos_agrupados_via_scraping(access_token, fecha_desde=None, fecha_hasta=None):
+    """
+    Obtiene movimientos agrupados (depósitos y extracciones) mediante scraping
+    de la página https://afi.invertironline.com/cliente-movimientos-agrupados
+    
+    Args:
+        access_token (str): Token de acceso para la autenticación
+        fecha_desde (str): Fecha desde en formato YYYY-MM-DD (opcional)
+        fecha_hasta (str): Fecha hasta en formato YYYY-MM-DD (opcional)
+    
+    Returns:
+        dict: Diccionario con movimientos agrupados por cliente
+    """
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+        import re
+        
+        st.info("🔍 Obteniendo movimientos agrupados via scraping...")
+        
+        # URL de la página de movimientos agrupados
+        url = 'https://afi.invertironline.com/cliente-movimientos-agrupados'
+        
+        # Headers para simular un navegador
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'es-AR,es;q=0.8,en-US;q=0.5,en;q=0.3',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Authorization': f'Bearer {access_token}'
+        }
+        
+        # Realizar la solicitud
+        response = requests.get(url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Buscar la tabla de movimientos
+            tabla_movimientos = soup.find('table', class_='ant-table-tbody') or soup.find('table')
+            
+            if tabla_movimientos:
+                movimientos = {}
+                filas = tabla_movimientos.find_all('tr')
+                
+                for fila in filas:
+                    celdas = fila.find_all('td')
+                    
+                    if len(celdas) >= 6:  # Verificar que tenga suficientes columnas
+                        # Extraer datos de cada celda
+                        nombre_cliente = celdas[0].get_text(strip=True) if len(celdas) > 0 else ''
+                        cc = celdas[1].get_text(strip=True) if len(celdas) > 1 else ''
+                        deposito_ars = celdas[2].get_text(strip=True) if len(celdas) > 2 else ''
+                        extraccion_ars = celdas[3].get_text(strip=True) if len(celdas) > 3 else ''
+                        deposito_usd = celdas[4].get_text(strip=True) if len(celdas) > 4 else ''
+                        extraccion_usd = celdas[5].get_text(strip=True) if len(celdas) > 5 else ''
+                        
+                        # Extraer ID del cliente del enlace
+                        enlace_cliente = celdas[0].find('a')
+                        id_cliente = None
+                        if enlace_cliente and enlace_cliente.get('href'):
+                            match = re.search(r'/cliente/(\d+)', enlace_cliente['href'])
+                            if match:
+                                id_cliente = match.group(1)
+                        
+                        # Limpiar y convertir valores monetarios
+                        def limpiar_valor_monetario(valor):
+                            if not valor or valor == '-' or valor == '$ 0,00' or valor == 'US$ 0,00':
+                                return 0.0
+                            # Remover símbolos y convertir a float
+                            valor_limpio = re.sub(r'[^\d,.-]', '', valor)
+                            valor_limpio = valor_limpio.replace(',', '.')
+                            try:
+                                return float(valor_limpio)
+                            except:
+                                return 0.0
+                        
+                        # Crear entrada para el cliente
+                        if id_cliente:
+                            movimientos[id_cliente] = {
+                                'nombre': nombre_cliente,
+                                'cc': cc,
+                                'deposito_ars': limpiar_valor_monetario(deposito_ars),
+                                'extraccion_ars': limpiar_valor_monetario(extraccion_ars),
+                                'deposito_usd': limpiar_valor_monetario(deposito_usd),
+                                'extraccion_usd': limpiar_valor_monetario(extraccion_usd),
+                                'neto_ars': limpiar_valor_monetario(deposito_ars) - limpiar_valor_monetario(extraccion_ars),
+                                'neto_usd': limpiar_valor_monetario(deposito_usd) - limpiar_valor_monetario(extraccion_usd)
+                            }
+                
+                st.success(f"📊 Se obtuvieron movimientos de {len(movimientos)} clientes via scraping")
+                
+                # Mostrar información de debug
+                if movimientos:
+                    st.info(f"🔍 Clientes encontrados: {list(movimientos.keys())}")
+                
+                return movimientos
+            else:
+                st.warning("⚠️ No se pudo encontrar la tabla de movimientos en la página")
+                return {}
+        else:
+            st.error(f"❌ Error al acceder a la página: {response.status_code}")
+            return {}
+            
+    except ImportError:
+        st.error("❌ Error: Se requiere BeautifulSoup4 para el scraping. Instalar con: pip install beautifulsoup4")
+        return {}
+    except Exception as e:
+        st.error(f"❌ Error en scraping de movimientos: {str(e)}")
+        return {}
+
+def obtener_operaciones_via_scraping_avanzado(access_token, id_cliente=None, fecha_desde=None, fecha_hasta=None):
+    """
+    Versión avanzada del scraping que intenta simular la interacción completa con el formulario
+    usando Selenium como fallback cuando BeautifulSoup no es suficiente
+    
+    Args:
+        access_token (str): Token de acceso para la autenticación
+        id_cliente (str): ID del cliente para filtrar operaciones (opcional)
+        fecha_desde (str): Fecha desde en formato YYYY-MM-DD (opcional)
+        fecha_hasta (str): Fecha hasta en formato YYYY-MM-DD (opcional)
+    
+    Returns:
+        list: Lista de operaciones obtenidas via scraping avanzado
+    """
+    try:
+        # Intentar con Selenium si está disponible
+        try:
+            from selenium import webdriver
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            from selenium.webdriver.chrome.options import Options
+            from selenium.webdriver.common.keys import Keys
+            import time
+            
+            st.info("🔍 Intentando scraping avanzado con Selenium...")
+            
+            # Configurar Chrome en modo headless
+            chrome_options = Options()
+            chrome_options.add_argument('--headless')
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--window-size=1920,1080')
+            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
+            
+            driver = webdriver.Chrome(options=chrome_options)
+            
+            try:
+                # Navegar a la página
+                driver.get('https://afi.invertironline.com/cliente-operaciones')
+                
+                # Esperar a que la página cargue
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CLASS_NAME, "ant-form"))
+                )
+                
+                # Configurar filtros
+                if fecha_desde and fecha_hasta:
+                    # Buscar el campo de fecha desde
+                    fecha_desde_input = driver.find_element(By.ID, "dateRange")
+                    fecha_desde_input.clear()
+                    fecha_desde_input.send_keys(fecha_desde)
+                    
+                    # Buscar el campo de fecha hasta (segundo input)
+                    fecha_inputs = driver.find_elements(By.CSS_SELECTOR, 'input[placeholder="Hasta"]')
+                    if fecha_inputs:
+                        fecha_inputs[0].clear()
+                        fecha_inputs[0].send_keys(fecha_hasta)
+                
+                # Buscar cliente si se especifica
+                if id_cliente:
+                    customer_input = driver.find_element(By.ID, "customer")
+                    customer_input.clear()
+                    customer_input.send_keys(str(id_cliente))
+                    customer_input.send_keys(Keys.RETURN)
+                
+                # Hacer clic en el botón buscar
+                buscar_button = driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
+                if buscar_button.is_enabled():
+                    buscar_button.click()
+                    
+                    # Esperar a que se carguen los resultados
+                    WebDriverWait(driver, 15).until(
+                        EC.presence_of_element_located((By.CLASS_NAME, "ant-table-tbody"))
+                    )
+                
+                # Extraer datos de la tabla
+                tabla = driver.find_element(By.CLASS_NAME, "ant-table-tbody")
+                filas = tabla.find_elements(By.TAG_NAME, "tr")
+                
+                operaciones = []
+                for fila in filas:
+                    celdas = fila.find_elements(By.TAG_NAME, "td")
+                    
+                    if len(celdas) >= 9:
+                        try:
+                            cc = celdas[0].text.strip()
+                            numero_fecha = celdas[1].text.strip()
+                            tipo = celdas[2].text.strip()
+                            simbolo = celdas[3].text.strip()
+                            cantidad_operada = celdas[5].text.strip()
+                            precio_operado = celdas[6].text.strip()
+                            monto_operado = celdas[7].text.strip()
+                            estado = celdas[8].text.strip()
+                            
+                            # Separar número y fecha
+                            partes = numero_fecha.split('\n')
+                            numero_orden = partes[0].strip() if len(partes) > 0 else ''
+                            fecha_orden = partes[1].strip() if len(partes) > 1 else ''
+                            
+                            operacion = {
+                                'numero': numero_orden,
+                                'fechaOrden': fecha_orden,
+                                'tipo': tipo,
+                                'simbolo': simbolo,
+                                'cantidad': float(cantidad_operada.replace(',', '.')) if cantidad_operada and cantidad_operada != '-' else 0,
+                                'precio': float(precio_operado.replace(',', '.')) if precio_operado and precio_operado != '-' else 0,
+                                'monto': float(monto_operado.replace(',', '.')) if monto_operado and monto_operado != '-' else 0,
+                                'estado': estado.lower() if estado else 'terminada',
+                                'fechaOperada': fecha_orden,
+                                'cantidadOperada': float(cantidad_operada.replace(',', '.')) if cantidad_operada and cantidad_operada != '-' else 0,
+                                'precioOperado': float(precio_operado.replace(',', '.')) if precio_operado and precio_operado != '-' else 0,
+                                'montoOperado': float(monto_operado.replace(',', '.')) if monto_operado and monto_operado != '-' else 0,
+                                'cc': cc
+                            }
+                            
+                            # Filtrar por cliente si se especifica
+                            if not id_cliente or str(id_cliente) in cc or str(id_cliente) in numero_orden:
+                                operaciones.append(operacion)
+                                
+                        except Exception as e:
+                            continue
+                
+                if operaciones:
+                    st.success(f"📊 Se obtuvieron {len(operaciones)} operaciones via Selenium")
+                    simbolos_encontrados = list(set([op.get('simbolo', 'N/A') for op in operaciones]))
+                    st.info(f"🔍 Símbolos encontrados via Selenium: {simbolos_encontrados}")
+                    return operaciones
+                else:
+                    st.warning("⚠️ No se encontraron operaciones con Selenium")
+                    return []
+                    
+            finally:
+                driver.quit()
+                
+        except ImportError:
+            st.warning("⚠️ Selenium no está disponible. Instalar con: pip install selenium")
+            return []
+        except Exception as selenium_error:
+            st.warning(f"⚠️ Error con Selenium: {selenium_error}")
+            return []
+            
+    except Exception as e:
+        st.error(f"❌ Error en scraping avanzado: {str(e)}")
+        return []
 
 def calcular_evolucion_portafolio_unificada(token_acceso, id_cliente, fecha_desde=None, fecha_hasta=None):
     """
