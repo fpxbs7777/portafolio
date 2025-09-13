@@ -2403,7 +2403,7 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                 st.info("✅ Usando solo fechas con datos completos")
             else:
                 # Estrategia 2: Forward fill y luego backward fill
-                df_precios_filled = df_precios.fillna(method='ffill').fillna(method='bfill')
+                df_precios_filled = df_precios.ffill().bfill()
                 
                 if not df_precios_filled.dropna().empty and len(df_precios_filled.dropna()) >= 30:
                     df_precios = df_precios_filled.dropna()
@@ -2430,7 +2430,18 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                 
         except Exception as e:
             st.error(f"❌ Error al alinear datos: {str(e)}")
-            return None, None, None
+            # Intentar una estrategia de respaldo más simple
+            try:
+                df_precios_simple = df_precios.dropna(how='all').ffill().bfill()
+                if not df_precios_simple.empty:
+                    df_precios = df_precios_simple
+                    st.info("✅ Usando estrategia de respaldo simple")
+                else:
+                    st.error("❌ No se pudieron cargar los datos históricos")
+                    return None, None, None
+            except Exception as e2:
+                st.error(f"❌ Error crítico en alineamiento de datos: {str(e2)}")
+                return None, None, None
         
         # Calcular retornos logarítmicos
         try:
@@ -9856,10 +9867,12 @@ def calcular_metricas_reales(timeline, indice_portafolio):
             'simbolos_unicos': len(simbolos_unicos),
             'concentracion_promedio': concentracion_promedio,
             'flujo_efectivo_neto': flujo_total,
-            'retorno_total': indice_portafolio['retorno_total'],
-            'volatilidad': indice_portafolio['volatilidad'],
-            'sharpe': indice_portafolio['sharpe'],
-            'max_drawdown': indice_portafolio['max_drawdown']
+            'retorno_total': indice_portafolio.get('retorno_total', 0),
+            'volatilidad': indice_portafolio.get('volatilidad', 0),
+            'sharpe': indice_portafolio.get('sharpe', 0),
+            'max_drawdown': indice_portafolio.get('max_drawdown', 0),
+            'valor_final': indice_portafolio.get('valor_final', 0),
+            'valor_inicial': indice_portafolio.get('valor_inicial', 0)
         }
         
     except Exception as e:
@@ -10032,28 +10045,28 @@ def mostrar_dashboard_unificado(datos):
     with col1:
         st.metric(
             "💰 Valor Total",
-            f"${metricas['valor_final']:,.2f}",
-            delta=f"{metricas['retorno_total']:+.2f}%"
+            f"${metricas.get('valor_final', 0):,.2f}",
+            delta=f"{metricas.get('retorno_total', 0):+.2f}%"
         )
     
     with col2:
         st.metric(
             "📊 Retorno Total",
-            f"{metricas['retorno_total']:+.2f}%",
+            f"{metricas.get('retorno_total', 0):+.2f}%",
             help="Retorno basado en operaciones reales"
         )
     
     with col3:
         st.metric(
             "⚖️ Volatilidad",
-            f"{metricas['volatilidad']:.2f}%",
+            f"{metricas.get('volatilidad', 0):.2f}%",
             help="Volatilidad anualizada"
         )
     
     with col4:
         st.metric(
             "📉 Max Drawdown",
-            f"{metricas['max_drawdown']:.2f}%",
+            f"{metricas.get('max_drawdown', 0):.2f}%",
             help="Pérdida máxima desde pico"
         )
     
@@ -10062,13 +10075,13 @@ def mostrar_dashboard_unificado(datos):
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("🔄 Total Operaciones", metricas['total_operaciones'])
+        st.metric("🔄 Total Operaciones", metricas.get('total_operaciones', 0))
     with col2:
-        st.metric("📅 Días con Operaciones", metricas['dias_con_operaciones'])
+        st.metric("📅 Días con Operaciones", metricas.get('dias_con_operaciones', 0))
     with col3:
-        st.metric("🏢 Símbolos Únicos", metricas['simbolos_unicos'])
+        st.metric("🏢 Símbolos Únicos", metricas.get('simbolos_unicos', 0))
     with col4:
-        st.metric("💸 Flujo Neto", f"${metricas['flujo_efectivo_neto']:,.2f}")
+        st.metric("💸 Flujo Neto", f"${metricas.get('flujo_efectivo_neto', 0):,.2f}")
     
     # Gráficos unificados
     crear_graficos_unificados(timeline, indice, operaciones)
