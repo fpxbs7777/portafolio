@@ -1027,16 +1027,12 @@ async def obtener_historico_mep_async(token_acceso, fecha_desde, fecha_hasta):
         dict: Diccionario con datos históricos del MEP calculado
     """
     try:
-        st.info(f"🔗 Consultando histórico MEP desde {fecha_desde} hasta {fecha_hasta}")
-        
         # Usar el método estándar que funciona correctamente
         tickers_especificos = ['AL30', 'AL30D']
         datos_series = {}
         
         # Obtener datos para cada ticker usando el método estándar
         for simbolo in tickers_especificos:
-            st.info(f"📊 Obteniendo datos históricos de {simbolo}...")
-            
             # Usar el método que funciona correctamente para las métricas del portafolio
             serie = obtener_serie_historica_activo(simbolo, token_acceso, fecha_desde, fecha_hasta)
             
@@ -1049,9 +1045,6 @@ async def obtener_historico_mep_async(token_acceso, fecha_desde, fecha_hasta):
                     'precios': precios,
                     'fechas': fechas
                 }
-                st.success(f"✅ {simbolo}: {len(precios)} puntos de datos")
-            else:
-                st.warning(f"⚠️ {simbolo}: No se pudieron obtener datos históricos")
         
         # Verificar que tenemos datos para ambos tickers
         if 'AL30' not in datos_series or 'AL30D' not in datos_series:
@@ -1069,9 +1062,9 @@ async def obtener_historico_mep_async(token_acceso, fecha_desde, fecha_hasta):
             'precio_al30d': datos_series['AL30D']['precios']
         })
         
-        # Convertir fechas a datetime
-        df_al30['fecha'] = pd.to_datetime(df_al30['fecha'])
-        df_al30d['fecha'] = pd.to_datetime(df_al30d['fecha'])
+        # Convertir fechas a datetime (sin zona horaria para evitar problemas de comparación)
+        df_al30['fecha'] = pd.to_datetime(df_al30['fecha']).dt.tz_localize(None)
+        df_al30d['fecha'] = pd.to_datetime(df_al30d['fecha']).dt.tz_localize(None)
         
         # Hacer merge por fecha
         df_merged = pd.merge(df_al30, df_al30d, on='fecha', how='inner')
@@ -1082,7 +1075,6 @@ async def obtener_historico_mep_async(token_acceso, fecha_desde, fecha_hasta):
         # Ordenar por fecha
         df_merged = df_merged.sort_values('fecha')
         
-        st.success(f"✅ Se calcularon {len(df_merged)} valores de MEP históricos")
         
         # Convertir a formato esperado por la interfaz
         datos_mep = []
@@ -1955,7 +1947,7 @@ def obtener_serie_historica_activo(simbolo, token_acceso, fecha_desde, fecha_has
         
         if df is not None and not df.empty and 'precio' in df.columns:
             # Crear serie con índice de fechas
-            df['fecha'] = pd.to_datetime(df['fecha'])
+            df['fecha'] = pd.to_datetime(df['fecha']).dt.tz_localize(None)
             df = df.set_index('fecha')
             return df['precio']
         
@@ -2586,8 +2578,23 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
         }
         
         response = requests.get(url_serie, headers=headers, timeout=30)
-        response.raise_for_status()
-        data = response.json()
+        
+        # Manejo específico para errores de servidor
+        if response.status_code == 500:
+            print(f"Error de conexión al obtener datos del FCI {simbolo}: 500 Server Error: Internal Server Error for url: {url_serie}")
+            return None
+        elif response.status_code == 404:
+            print(f"FCI {simbolo} no encontrado en la API")
+            return None
+        elif response.status_code != 200:
+            print(f"Error {response.status_code} al obtener datos del FCI {simbolo}")
+            return None
+            
+        try:
+            data = response.json()
+        except ValueError as e:
+            print(f"Error al parsear respuesta JSON para FCI {simbolo}: {e}")
+            return None
         
         # Procesar la respuesta según el formato esperado
         if isinstance(data, list):
@@ -5413,20 +5420,6 @@ def mostrar_estado_cuenta(estado_cuenta):
         if numero_cuentas_unicas != len(cuentas):
             st.info(f"ℹ️ **Nota**: Se muestran {len(cuentas)} registros de {numero_cuentas_unicas} cuentas únicas")
         
-        # Verificar si hay incoherencias en los datos
-        incoherencias_detectadas = False
-        for cuenta in cuentas:
-            disponible = float(cuenta.get('disponible', 0))
-            saldo = float(cuenta.get('saldo', 0))
-            total = float(cuenta.get('total', 0))
-            total_calculado = disponible + saldo
-            
-            if abs(total - total_calculado) > 0.01:
-                incoherencias_detectadas = True
-                break
-        
-        if incoherencias_detectadas:
-            st.warning("⚠️ **Advertencia**: Se detectaron incoherencias en los datos del estado de cuenta. Los valores 'Total' de la API no coinciden con la suma de 'Disponible' + 'Saldo'. Esto puede deberse a diferencias en el procesamiento de la API de IOL.")
 
 def obtener_parametros_operatoria_mep(token_acceso):
     """
@@ -5709,7 +5702,7 @@ def obtener_historico_mep(token_acceso, fecha_desde, fecha_hasta):
                         'fecha': fechas,
                         'precio': precios
                     })
-                    df['fecha'] = pd.to_datetime(df['fecha'])
+                    df['fecha'] = pd.to_datetime(df['fecha']).dt.tz_localize(None)
                     df = df.sort_values('fecha')
                     datos_series[simbolo] = df
                     st.success(f"✅ {simbolo}: {len(df)} puntos de datos")
@@ -5748,7 +5741,6 @@ def obtener_historico_mep(token_acceso, fecha_desde, fecha_hasta):
         # Ordenar por fecha
         df_merged = df_merged.sort_values('fecha')
         
-        st.success(f"✅ Se calcularon {len(df_merged)} valores de MEP históricos")
         
         # Convertir a formato esperado por la interfaz
         datos_mep = []
@@ -5839,7 +5831,6 @@ def mostrar_cotizaciones_mercado(token_acceso):
                         resumen = datos_historicos.get('resumen', {})
                         df_historico = datos_historicos.get('dataframe')
                         
-                        st.success(f"✅ Se calcularon {resumen.get('total_registros', 0)} valores de MEP históricos")
                         
                         # Mostrar métricas principales del MEP
                         col1, col2, col3, col4 = st.columns(4)
@@ -8995,6 +8986,95 @@ def calcular_frontera_interactiva(manager_inst, calcular_todos=True, incluir_act
         st.error(f"❌ Error en frontera eficiente interactiva: {str(e)}")
         return None
 
+def validar_operaciones_con_portafolio(operaciones, portafolio):
+    """
+    Valida que las operaciones coincidan con los activos del portafolio actual
+    
+    Args:
+        operaciones (list): Lista de operaciones obtenidas
+        portafolio (dict): Datos del portafolio actual
+    
+    Returns:
+        tuple: (operaciones_validadas, simbolos_portafolio, simbolos_operaciones)
+    """
+    if not operaciones or not portafolio:
+        return [], [], []
+    
+    # Obtener símbolos del portafolio actual
+    simbolos_portafolio = set()
+    if 'activos' in portafolio:
+        for activo in portafolio['activos']:
+            simbolo = activo.get('titulo', {}).get('simbolo', '')
+            if simbolo:
+                simbolos_portafolio.add(simbolo)
+    
+    # Obtener símbolos de las operaciones
+    simbolos_operaciones = set()
+    operaciones_validadas = []
+    
+    for op in operaciones:
+        simbolo = op.get('simbolo', '')
+        if simbolo:
+            simbolos_operaciones.add(simbolo)
+            # Solo incluir operaciones de activos que están en el portafolio actual
+            if simbolo in simbolos_portafolio:
+                operaciones_validadas.append(op)
+    
+    return operaciones_validadas, simbolos_portafolio, simbolos_operaciones
+
+def filtrar_operaciones_relevantes(operaciones, portafolio=None, mostrar_estadisticas=True):
+    """
+    Filtra operaciones para mostrar solo las más relevantes y recientes
+    
+    Args:
+        operaciones (list): Lista de operaciones
+        portafolio (dict): Portafolio actual (opcional)
+        mostrar_estadisticas (bool): Mostrar estadísticas del filtrado
+    
+    Returns:
+        list: Operaciones filtradas
+    """
+    if not operaciones:
+        return []
+    
+    operaciones_filtradas = []
+    
+    # Filtrar operaciones terminadas y con datos válidos
+    for op in operaciones:
+        estado = op.get('estado', '').lower()
+        simbolo = op.get('simbolo', '')
+        cantidad_operada = op.get('cantidadOperada', 0)
+        
+        # Solo incluir operaciones terminadas con datos válidos
+        if (estado == 'terminada' and simbolo and 
+            cantidad_operada and cantidad_operada > 0):
+            operaciones_filtradas.append(op)
+    
+    # Si hay portafolio, validar contra activos actuales
+    if portafolio:
+        operaciones_validadas, simbolos_portafolio, simbolos_operaciones = validar_operaciones_con_portafolio(
+            operaciones_filtradas, portafolio
+        )
+        
+        if mostrar_estadisticas:
+            st.info(f"🎯 Filtrado de operaciones:")
+            st.info(f"   • Operaciones totales: {len(operaciones)}")
+            st.info(f"   • Operaciones terminadas: {len(operaciones_filtradas)}")
+            st.info(f"   • Operaciones del portafolio actual: {len(operaciones_validadas)}")
+            st.info(f"   • Activos en portafolio: {len(simbolos_portafolio)}")
+            
+            # Mostrar activos que no tienen operaciones
+            activos_sin_operaciones = simbolos_portafolio - simbolos_operaciones
+            if activos_sin_operaciones:
+                st.info(f"   • Activos sin operaciones históricas: {list(activos_sin_operaciones)}")
+        
+        return operaciones_validadas
+    else:
+        if mostrar_estadisticas:
+            st.info(f"🎯 Operaciones filtradas: {len(operaciones_filtradas)} de {len(operaciones)} totales")
+        
+        return operaciones_filtradas
+
 def obtener_movimientos_reales(access_token, id_cliente=None, fecha_desde=None, fecha_hasta=None):
     """
     Obtiene los movimientos/operaciones de la cuenta usando la API de InvertirOnline
@@ -9043,6 +9123,12 @@ def obtener_movimientos_reales(access_token, id_cliente=None, fecha_desde=None, 
                 st.info(f"🔍 Símbolos encontrados: {simbolos_encontrados}")
             else:
                 st.warning("⚠️ No se encontraron operaciones en el período especificado")
+            
+            # Mostrar información adicional sobre el filtrado
+            if operaciones:
+                st.info(f"📊 Operaciones obtenidas: {len(operaciones)}")
+                simbolos_unicos = list(set([op.get('simbolo', 'N/A') for op in operaciones]))
+                st.info(f"🔍 Activos encontrados: {len(simbolos_unicos)} únicos")
             
             return operaciones
         else:
@@ -9116,11 +9202,53 @@ def obtener_operaciones_via_scraping(access_token, id_cliente=None, fecha_desde=
             if csrf_input:
                 csrf_token = csrf_input.get('value')
             
-            # Preparar datos del formulario
+            # Extraer valores actuales del formulario
+            status_actual = 'Todas'
+            cliente_actual = None
+            pais_actual = 'argentina'
+            fecha_desde_actual = None
+            fecha_hasta_actual = None
+            
+            # Buscar el radio button seleccionado para status
+            status_radio = soup.find('input', {'name': 'status', 'checked': True})
+            if status_radio:
+                status_actual = status_radio.get('value', 'Todas')
+            
+            # Buscar el cliente seleccionado
+            cliente_selected = soup.find('span', class_='ant-select-selection-item')
+            if cliente_selected:
+                cliente_actual = cliente_selected.get_text(strip=True)
+            
+            # Buscar el país seleccionado
+            pais_selected = soup.find('span', class_='ant-select-selection-item')
+            if pais_selected and 'Argentina' in pais_selected.get_text():
+                pais_actual = 'argentina'
+            
+            # Buscar las fechas en los inputs
+            fecha_inputs = soup.find_all('input', {'id': 'dateRange'})
+            for i, input_elem in enumerate(fecha_inputs):
+                valor = input_elem.get('value', '')
+                if i == 0 and valor:
+                    fecha_desde_actual = valor
+                elif i == 1 and valor:
+                    fecha_hasta_actual = valor
+            
+            # Buscar el segundo input de fecha (placeholder "Hasta")
+            fecha_hasta_input = soup.find('input', {'placeholder': 'Hasta'})
+            if fecha_hasta_input:
+                fecha_hasta_actual = fecha_hasta_input.get('value', fecha_hasta_actual)
+            
+            st.info(f"🔍 Valores detectados del formulario:")
+            st.info(f"   - Cliente: {cliente_actual}")
+            st.info(f"   - Fechas: {fecha_desde_actual} a {fecha_hasta_actual}")
+            st.info(f"   - País: {pais_actual}")
+            st.info(f"   - Estado: {status_actual}")
+            
+            # Preparar datos del formulario con valores detectados o proporcionados
             form_data = {
-                'status': 'Todas',  # Por defecto todas las operaciones
-                'country': 'argentina',  # País por defecto
-                'singleDay': 'false'  # Buscar en rango de fechas
+                'status': status_actual,
+                'country': pais_actual,
+                'singleDay': 'false'
             }
             
             # Agregar fechas si se proporcionan
@@ -9523,7 +9651,7 @@ def calcular_evolucion_portafolio_unificada(token_acceso, id_cliente, fecha_desd
         
         # Procesar operaciones y crear timeline
         df_ops = pd.DataFrame(operaciones)
-        df_ops['fechaOrden'] = pd.to_datetime(df_ops['fechaOrden'], format='mixed')
+        df_ops['fechaOrden'] = pd.to_datetime(df_ops['fechaOrden'], format='mixed').dt.tz_localize(None)
         df_ops = df_ops.sort_values('fechaOrden')
         
         # Crear timeline de composición del portafolio
@@ -9820,12 +9948,12 @@ def calcular_valor_portafolio_historico_streamlit(operaciones, fecha_desde=None,
     
     # Crear serie temporal del valor del portafolio
     if fecha_desde:
-        fecha_inicio = pd.to_datetime(fecha_desde).date()
+        fecha_inicio = pd.to_datetime(fecha_desde).tz_localize(None).date()
     else:
         fecha_inicio = df_ops['fechaOrden'].min().date()
     
     if fecha_hasta:
-        fecha_fin = pd.to_datetime(fecha_hasta).date()
+        fecha_fin = pd.to_datetime(fecha_hasta).tz_localize(None).date()
     else:
         fecha_fin = datetime.now().date()
     
@@ -10271,7 +10399,7 @@ def unificar_composicion_portafolio(portafolio_actual, operaciones, token_acceso
             
             for op in operaciones:
                 if op.get('simbolo') == simbolo and op.get('estado') == 'terminada':
-                    fecha_op = pd.to_datetime(op.get('fechaOperada', op.get('fechaOrden')))
+                    fecha_op = pd.to_datetime(op.get('fechaOperada', op.get('fechaOrden'))).tz_localize(None)
                     cantidad = op.get('cantidadOperada', op.get('cantidad', 0))
                     
                     if op.get('tipo') == 'Compra':
@@ -10299,7 +10427,7 @@ def unificar_composicion_portafolio(portafolio_actual, operaciones, token_acceso
                 posicion_acumulada = 0
                 for op in operaciones:
                     if op.get('simbolo') == simbolo and op.get('estado') == 'terminada':
-                        fecha_op = pd.to_datetime(op.get('fechaOperada', op.get('fechaOrden')))
+                        fecha_op = pd.to_datetime(op.get('fechaOperada', op.get('fechaOrden'))).tz_localize(None)
                         if fecha_op <= fecha:
                             cantidad = op.get('cantidadOperada', op.get('cantidad', 0))
                             if op.get('tipo') == 'Compra':
@@ -10480,7 +10608,7 @@ def mostrar_operaciones_reales():
                 st.subheader("📊 Resumen de Operaciones")
                 
                 df_ops = pd.DataFrame(operaciones)
-                df_ops['fechaOrden'] = pd.to_datetime(df_ops['fechaOrden'], format='mixed')
+                df_ops['fechaOrden'] = pd.to_datetime(df_ops['fechaOrden'], format='mixed').dt.tz_localize(None)
                 
                 # Métricas principales
                 col1, col2, col3, col4 = st.columns(4)
@@ -10610,14 +10738,12 @@ def mostrar_analisis_portafolio():
             return
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "🇦🇷 Portafolio Argentina", 
         "🇺🇸 Portafolio EEUU",
-        "💰 Estado de Cuenta", 
         "🎯 Optimización y Cobertura",
         "📊 Análisis Técnico",
         "💱 Dólares y Mercado",
-        "📈 Operaciones Reales",
         "🔍 Análisis Unificado"
     ])
 
@@ -10636,86 +10762,6 @@ def mostrar_analisis_portafolio():
             st.warning("No se pudo obtener el portafolio de EEUU")
     
     with tab3:
-        # Estado de cuenta consolidado
-        st.subheader("🇦🇷 Estado de Cuenta Argentina")
-        if estado_cuenta_ar:
-            mostrar_estado_cuenta(estado_cuenta_ar)
-        else:
-            st.warning("No se pudo obtener el estado de cuenta de Argentina")
-        
-        # Vista consolidada de todas las cuentas
-        st.subheader("🔍 Vista Consolidada de Todas las Cuentas")
-        if estado_cuenta_ar:
-            cuentas_totales = estado_cuenta_ar.get('cuentas', [])
-            if cuentas_totales:
-                # Crear DataFrame con clasificación por país
-                datos_consolidados = []
-                descripciones_validas = False
-                
-                for cuenta in cuentas_totales:
-                    numero = cuenta.get('numero', 'N/A')
-                    descripcion = cuenta.get('descripcion', 'N/A')
-                    moneda = cuenta.get('moneda', 'N/A')
-                    
-                    # Verificar si hay descripciones válidas
-                    if descripcion and descripcion != 'N/A' and descripcion.strip():
-                        descripciones_validas = True
-                    
-                    # Determinar si es cuenta de EEUU
-                    es_cuenta_eeuu = any([
-                        'eeuu' in descripcion.lower() if descripcion != 'N/A' else False,
-                        'estados unidos' in descripcion.lower() if descripcion != 'N/A' else False,
-                        '-eeuu' in str(numero).lower(),
-                        'dolar estadounidense' in moneda.lower(),
-                        'dolar_estadounidense' in moneda.lower(),
-                        'usd' in moneda.lower()
-                    ])
-                    
-                    pais = "🇺🇸 EEUU" if es_cuenta_eeuu else "🇦🇷 Argentina"
-                    
-                    # Obtener valores y validar coherencia
-                    disponible = float(cuenta.get('disponible', 0))
-                    saldo = float(cuenta.get('saldo', 0))
-                    total = float(cuenta.get('total', 0))
-                    
-                    # Crear diccionario base con valores de la API
-                    cuenta_data = {
-                        'País': pais,
-                        'Número': numero,
-                        'Moneda': moneda.replace('_', ' ').title(),
-                        'Disponible': disponible,
-                        'Saldo': saldo,
-                        'Total': total,
-                    }
-                    
-                    # Solo agregar descripción si hay descripciones válidas
-                    if descripciones_validas:
-                        cuenta_data['Descripción'] = descripcion
-                    
-                    datos_consolidados.append(cuenta_data)
-                
-                df_consolidado = pd.DataFrame(datos_consolidados)
-                
-                # Agrupar por país y mostrar resumen
-                resumen_por_pais = df_consolidado.groupby('País').agg({
-                    'Total': 'sum',
-                    'Número': 'count'
-                }).round(2)
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Total Argentina", f"AR$ {resumen_por_pais.loc['🇦🇷 Argentina', 'Total']:,.2f}" if '🇦🇷 Argentina' in resumen_por_pais.index else "AR$ 0.00")
-                    st.metric("Cuentas Argentina", resumen_por_pais.loc['🇦🇷 Argentina', 'Número'] if '🇦🇷 Argentina' in resumen_por_pais.index else 0)
-                
-                with col2:
-                    st.metric("Total EEUU", f"AR$ {resumen_por_pais.loc['🇺🇸 EEUU', 'Total']:,.2f}" if '🇺🇸 EEUU' in resumen_por_pais.index else "AR$ 0.00")
-                    st.metric("Cuentas EEUU", resumen_por_pais.loc['🇺🇸 EEUU', 'Número'] if '🇺🇸 EEUU' in resumen_por_pais.index else 0)
-                
-                # Mostrar tabla detallada
-                st.subheader("📋 Detalle Completo de Cuentas")
-                st.dataframe(df_consolidado, use_container_width=True, height=400)
-    
-    with tab4:
         # Menú unificado de optimización y cobertura
         if portafolio_ar or portafolio_eeuu:
             # Combinar portafolios si ambos están disponibles
@@ -10724,35 +10770,13 @@ def mostrar_analisis_portafolio():
         else:
             st.warning("No se pudo obtener ningún portafolio para optimización")
     
-    with tab5:
+    with tab4:
         mostrar_analisis_tecnico(token_acceso, id_cliente, portafolio_ar, portafolio_eeuu)
     
-    with tab6:
+    with tab5:
         mostrar_cotizaciones_mercado(token_acceso)
     
-    with tab7:
-        st.subheader("📈 Análisis de Operaciones Reales")
-        st.info("🔍 Esta sección analiza las operaciones reales de compra/venta de tu portafolio para calcular retornos basados en fechas reales de compra.")
-        
-        # Seleccionar portafolio a analizar
-        portafolio_seleccionado = st.selectbox(
-            "Seleccionar portafolio para análisis:",
-            options=[
-                ("🇦🇷 Argentina", portafolio_ar),
-                ("🇺🇸 Estados Unidos", portafolio_eeuu)
-            ],
-            format_func=lambda x: x[0],
-            help="Selecciona el portafolio que deseas analizar",
-            key="portafolio_operaciones_reales"
-        )
-        
-        if portafolio_seleccionado[1]:
-            # Usar la función que incluye el ID del cliente
-            mostrar_resumen_operaciones_reales(portafolio_seleccionado[1], token_acceso, "operaciones_reales", id_cliente)
-        else:
-            st.warning("⚠️ No hay datos disponibles para el portafolio seleccionado")
-    
-    with tab8:
+    with tab6:
         st.subheader("🔍 Análisis Unificado del Portafolio")
         st.info("🚀 Esta sección proporciona un análisis unificado que indexa correctamente la evolución real de la composición del portafolio, movimientos de compra/venta, línea de tiempo e índice inteligente con retornos y riesgos reales.")
         
@@ -11176,7 +11200,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "📈 Operaciones Reales"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio"),
                 index=0,
             )
 
@@ -11188,8 +11212,6 @@ def main():
                     mostrar_analisis_portafolio()
                 else:
                     st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
-            elif opcion == "📈 Operaciones Reales":
-                mostrar_operaciones_reales()
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
             
