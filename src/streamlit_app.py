@@ -5,7 +5,7 @@ import pandas as pd
 from plotly.subplots import make_subplots
 from datetime import date, timedelta, datetime
 import numpy as np
-# import yfinance as yf  # Removido - usando solo API de IOL
+import yfinance as yf  # Rehabilitado para análisis estadístico
 import scipy.optimize as op
 from scipy import stats
 from scipy import optimize
@@ -19,8 +19,136 @@ import time
 import asyncio
 import aiohttp
 import re
+import seaborn as sns
 
 warnings.filterwarnings('ignore')
+
+# =============================================================================
+# CLASES Y FUNCIONES PARA ANÁLISIS ESTADÍSTICO
+# =============================================================================
+
+def get_daily_data_yfinance(ticker, period="1y", interval="1d"):
+    """
+    Obtiene datos diarios usando yfinance
+    """
+    try:
+        data = yf.download(ticker, period=period, interval=interval, progress=False)
+        data.reset_index(inplace=True)
+        return data
+    except Exception as e:
+        st.error(f"Error obteniendo datos de yfinance para {ticker}: {str(e)}")
+        return None
+
+def load_timeseries_from_df(df, date_col, price_col):
+    """
+    Carga los datos de la serie temporal desde el DataFrame.
+    """
+    try:
+        t = pd.DataFrame()
+        t['date'] = pd.to_datetime(df[date_col], utc=True, errors='coerce')
+        t['close'] = df[price_col]
+        t = t.sort_values(by='date').dropna().reset_index(drop=True)
+        t['close_previous'] = t['close'].shift(1)
+        t['return_close'] = t['close'] / t['close_previous'] - 1
+        t = t.dropna().reset_index(drop=True)
+        return t
+    except Exception as e:
+        st.error(f"Error procesando serie temporal: {str(e)}")
+        return None
+
+class Distribution:
+    def __init__(self, timeseries, investment_amount, decimals=5, factor=252):
+        self.timeseries = timeseries
+        self.investment_amount = investment_amount
+        self.decimals = decimals
+        self.factor = factor  # Factor para anualizar (252 días hábiles)
+        self.vector = self.timeseries['return_close'].values
+        self.current_price = self.timeseries['close'].iloc[-1]
+        self.mean_annual = None
+        self.volatility_annual = None
+        self.sharpe_ratio = None
+        self.var_95 = None
+        self.skewness = None
+        self.kurtosis = None
+        self.jb_stat = None
+        self.p_value = None
+        self.is_normal = None
+        self.max_loss = None
+        self.expected_loss = None
+        self.expected_gain = None
+        self.max_gain = None
+        self.most_probable = None
+
+    def compute_stats(self):
+        """
+        Calcula estadísticas clave:
+        - Media anualizada
+        - Volatilidad anualizada
+        - Ratio de Sharpe
+        - Percentil al 5% (VaR)
+        - Test de normalidad (Jarque-Bera)
+        """
+        try:
+            self.mean_annual = np.mean(self.vector) * self.factor
+            self.volatility_annual = np.std(self.vector) * np.sqrt(self.factor)
+            self.sharpe_ratio = self.mean_annual / self.volatility_annual if self.volatility_annual > 0 else 0.0
+            self.var_95 = np.percentile(self.vector, 5)
+            self.skewness = st.skew(self.vector)
+            self.kurtosis = st.kurtosis(self.vector)
+            self.jb_stat = len(self.vector) / 6 * (self.skewness**2 + (1 / 4) * (self.kurtosis - 3)**2)
+            self.p_value = 1 - st.chi2.cdf(self.jb_stat, df=2)
+            self.is_normal = self.p_value > 0.05
+
+            # Calcular escenarios de inversión
+            self.max_loss = self.current_price * self.var_95
+            self.expected_loss = self.current_price * np.mean(self.vector[self.vector < 0]) if len(self.vector[self.vector < 0]) > 0 else 0
+            self.expected_gain = self.current_price * np.mean(self.vector[self.vector > 0]) if len(self.vector[self.vector > 0]) > 0 else 0
+            self.max_gain = self.current_price * np.max(self.vector)
+            self.most_probable = self.current_price * np.median(self.vector)
+
+        except Exception as e:
+            st.error(f"Error calculando estadísticas: {str(e)}")
+
+    def get_stats_dict(self):
+        """
+        Retorna las estadísticas como diccionario
+        """
+        return {
+            'Precio Actual': self.current_price,
+            'Media Anualizada': self.mean_annual,
+            'Volatilidad Anualizada': self.volatility_annual,
+            'Ratio de Sharpe': self.sharpe_ratio,
+            'VaR 95%': self.var_95,
+            'Skewness': self.skewness,
+            'Kurtosis': self.kurtosis,
+            'JB Statistic': self.jb_stat,
+            'P-Value': self.p_value,
+            'Es Normal': self.is_normal,
+            'Pérdida Máxima': self.max_loss,
+            'Ganancia Esperada': self.expected_gain,
+            'Pérdida Esperada': self.expected_loss,
+            'Ganancia Máxima': self.max_gain,
+            'Más Probable': self.most_probable
+        }
+
+def analyze_best_distribution(returns, decimals=3):
+    """
+    Analiza la mejor distribución para los retornos
+    """
+    distributions = ['norm', 't', 'uniform', 'expon', 'chi2']
+    results = {}
+    
+    for dist in distributions:
+        try:
+            dist_obj = getattr(st, dist)
+            params = dist_obj.fit(returns)
+            ks_stat, p_value = st.kstest(returns, dist, args=params)
+            results[dist] = {'KS Statistic': round(ks_stat, decimals), 'P-Value': round(p_value, decimals)}
+        except Exception:
+            results[dist] = {'KS Statistic': 999, 'P-Value': 0}
+    
+    best_fit = max(results, key=lambda x: results[x]['P-Value'])
+    return results, best_fit
 
 # Configuración de la página con tema oscuro profesional
 st.set_page_config(
@@ -5967,6 +6095,207 @@ def mostrar_cotizaciones_mercado(token_acceso):
             else:
                     st.warning("⚠️ Por favor seleccione fechas válidas")
     
+    # Sección para análisis estadístico
+    with st.expander("📊 Análisis Estadístico de Activos", expanded=False):
+        st.info("📈 **Análisis Estadístico Avanzado**: Calcula métricas estadísticas usando datos reales de IOL")
+        
+        with st.form("analisis_estadistico_form"):
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                simbolo_analisis = st.text_input(
+                    "Símbolo del Activo", 
+                    value="AL30",
+                    help="Ingrese el símbolo del activo a analizar (ej: AL30, GGAL, PAMP)"
+                )
+            
+            with col2:
+                periodo_analisis = st.selectbox(
+                    "Período de Análisis",
+                    ["1y", "2y", "5y", "max"],
+                    index=1,
+                    help="Período de datos históricos para el análisis"
+                )
+            
+            with col3:
+                monto_inversion = st.number_input(
+                    "Monto de Inversión ($)",
+                    value=10000,
+                    min_value=1000,
+                    step=1000,
+                    help="Monto hipotético para calcular escenarios"
+                )
+            
+            if st.form_submit_button("🔍 Realizar Análisis Estadístico"):
+                if simbolo_analisis:
+                    with st.spinner(f"Analizando {simbolo_analisis}..."):
+                        # Obtener datos usando yfinance
+                        datos_yf = get_daily_data_yfinance(simbolo_analisis, period=periodo_analisis)
+                        
+                        if datos_yf is not None and not datos_yf.empty:
+                            # Procesar datos
+                            serie_temporal = load_timeseries_from_df(datos_yf, 'Date', 'Close')
+                            
+                            if serie_temporal is not None and len(serie_temporal) > 30:
+                                # Crear objeto de distribución y calcular estadísticas
+                                distribucion = Distribution(serie_temporal, monto_inversion)
+                                distribucion.compute_stats()
+                                
+                                # Mostrar resultados
+                                st.success(f"✅ Análisis completado para {simbolo_analisis}")
+                                
+                                # Métricas principales
+                                col1, col2, col3, col4 = st.columns(4)
+                                
+                                with col1:
+                                    st.metric(
+                                        "Precio Actual", 
+                                        f"${distribucion.current_price:.2f}",
+                                        help="Precio actual del activo"
+                                    )
+                                
+                                with col2:
+                                    st.metric(
+                                        "Retorno Anual", 
+                                        f"{distribucion.mean_annual:.2%}",
+                                        help="Retorno promedio anualizado"
+                                    )
+                                
+                                with col3:
+                                    st.metric(
+                                        "Volatilidad Anual", 
+                                        f"{distribucion.volatility_annual:.2%}",
+                                        help="Volatilidad anualizada"
+                                    )
+                                
+                                with col4:
+                                    st.metric(
+                                        "Ratio de Sharpe", 
+                                        f"{distribucion.sharpe_ratio:.3f}",
+                                        help="Ratio de Sharpe (retorno/riesgo)"
+                                    )
+                                
+                                # Análisis de riesgo
+                                st.subheader("🎯 Análisis de Riesgo")
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    st.markdown("**📊 Métricas de Riesgo:**")
+                                    st.write(f"• **VaR 95%**: {distribucion.var_95:.2%}")
+                                    st.write(f"• **Skewness**: {distribucion.skewness:.3f}")
+                                    st.write(f"• **Kurtosis**: {distribucion.kurtosis:.3f}")
+                                    st.write(f"• **Test Normalidad**: {'✅ Normal' if distribucion.is_normal else '❌ No Normal'}")
+                                
+                                with col2:
+                                    st.markdown("**💰 Escenarios de Inversión:**")
+                                    st.write(f"• **Pérdida Máxima**: ${distribucion.max_loss:.2f}")
+                                    st.write(f"• **Ganancia Esperada**: ${distribucion.expected_gain:.2f}")
+                                    st.write(f"• **Pérdida Esperada**: ${distribucion.expected_loss:.2f}")
+                                    st.write(f"• **Más Probable**: ${distribucion.most_probable:.2f}")
+                                
+                                # Análisis de distribución
+                                st.subheader("📈 Análisis de Distribución")
+                                
+                                # Obtener mejor distribución
+                                resultados_dist, mejor_dist = analyze_best_distribution(
+                                    distribucion.vector, decimals=4
+                                )
+                                
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    st.markdown("**🏆 Mejor Ajuste de Distribución:**")
+                                    st.success(f"**{mejor_dist.upper()}** (p-value: {resultados_dist[mejor_dist]['P-Value']:.4f})")
+                                    
+                                    st.markdown("**📋 Comparación de Distribuciones:**")
+                                    for dist_name, stats in resultados_dist.items():
+                                        color = "🟢" if dist_name == mejor_dist else "⚪"
+                                        st.write(f"{color} **{dist_name.upper()}**: KS={stats['KS Statistic']:.4f}, p={stats['P-Value']:.4f}")
+                                
+                                with col2:
+                                    # Gráfico de histograma con distribución ajustada
+                                    fig_hist = go.Figure()
+                                    
+                                    # Histograma de retornos
+                                    fig_hist.add_trace(go.Histogram(
+                                        x=distribucion.vector,
+                                        nbinsx=50,
+                                        name='Retornos Observados',
+                                        opacity=0.7,
+                                        marker_color='lightblue'
+                                    ))
+                                    
+                                    # Línea de distribución normal para comparación
+                                    x_range = np.linspace(distribucion.vector.min(), distribucion.vector.max(), 100)
+                                    y_normal = st.norm.pdf(x_range, distribucion.vector.mean(), distribucion.vector.std())
+                                    fig_hist.add_trace(go.Scatter(
+                                        x=x_range,
+                                        y=y_normal * len(distribucion.vector) * (distribucion.vector.max() - distribucion.vector.min()) / 50,
+                                        mode='lines',
+                                        name='Distribución Normal',
+                                        line=dict(color='red', width=2)
+                                    ))
+                                    
+                                    fig_hist.update_layout(
+                                        title=f'Distribución de Retornos - {simbolo_analisis}',
+                                        xaxis_title='Retornos Diarios',
+                                        yaxis_title='Frecuencia',
+                                        height=400,
+                                        template='plotly_white'
+                                    )
+                                    
+                                    st.plotly_chart(fig_hist, use_container_width=True)
+                                
+                                # Gráfico de serie temporal
+                                st.subheader("📊 Serie Temporal de Precios")
+                                
+                                fig_ts = go.Figure()
+                                fig_ts.add_trace(go.Scatter(
+                                    x=serie_temporal['date'],
+                                    y=serie_temporal['close'],
+                                    mode='lines',
+                                    name=f'Precio {simbolo_analisis}',
+                                    line=dict(color='#1f77b4', width=2)
+                                ))
+                                
+                                fig_ts.update_layout(
+                                    title=f'Evolución del Precio - {simbolo_analisis}',
+                                    xaxis_title='Fecha',
+                                    yaxis_title='Precio ($)',
+                                    height=400,
+                                    template='plotly_white',
+                                    hovermode='x unified'
+                                )
+                                
+                                st.plotly_chart(fig_ts, use_container_width=True)
+                                
+                                # Tabla de estadísticas detalladas
+                                st.subheader("📋 Estadísticas Detalladas")
+                                stats_dict = distribucion.get_stats_dict()
+                                
+                                # Crear DataFrame para mostrar
+                                df_stats = pd.DataFrame([
+                                    {"Métrica": "Precio Actual", "Valor": f"${stats_dict['Precio Actual']:.2f}"},
+                                    {"Métrica": "Media Anualizada", "Valor": f"{stats_dict['Media Anualizada']:.4f}"},
+                                    {"Métrica": "Volatilidad Anualizada", "Valor": f"{stats_dict['Volatilidad Anualizada']:.4f}"},
+                                    {"Métrica": "Ratio de Sharpe", "Valor": f"{stats_dict['Ratio de Sharpe']:.4f}"},
+                                    {"Métrica": "VaR 95%", "Valor": f"{stats_dict['VaR 95%']:.4f}"},
+                                    {"Métrica": "Skewness", "Valor": f"{stats_dict['Skewness']:.4f}"},
+                                    {"Métrica": "Kurtosis", "Valor": f"{stats_dict['Kurtosis']:.4f}"},
+                                    {"Métrica": "JB Statistic", "Valor": f"{stats_dict['JB Statistic']:.4f}"},
+                                    {"Métrica": "P-Value", "Valor": f"{stats_dict['P-Value']:.4f}"},
+                                    {"Métrica": "Es Normal", "Valor": "Sí" if stats_dict['Es Normal'] else "No"},
+                                ])
+                                
+                                st.dataframe(df_stats, use_container_width=True, hide_index=True)
+                                
+                            else:
+                                st.error("❌ No hay suficientes datos para realizar el análisis estadístico")
+                        else:
+                            st.error(f"❌ No se pudieron obtener datos para {simbolo_analisis}")
+                else:
+                    st.warning("⚠️ Por favor ingrese un símbolo válido")
+
     # Sección para operar con dólares MEP
     with st.expander("💱 Operar con Dólares MEP", expanded=False):
         st.info("💰 Realiza operaciones de compra y venta de dólares MEP usando la operatoria simplificada")
