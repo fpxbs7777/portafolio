@@ -1960,6 +1960,7 @@ def obtener_metricas_portafolio_reales(portafolio, token_acceso, fecha_desde, fe
         st.error(f"Error obteniendo métricas reales del portafolio: {str(e)}")
         return None
 
+@st.cache_data(ttl=300)  # Cache por 5 minutos para mejor rendimiento
 def obtener_serie_historica_activo(simbolo, token_acceso, fecha_desde, fecha_hasta):
     """
     Obtiene la serie histórica de un activo específico
@@ -2163,7 +2164,7 @@ def calcular_indicadores_tecnicos_avanzados(precios, periodo=14):
     
     return indicadores
 
-@st.cache_data(ttl=600)  # Cache por 10 minutos
+@st.cache_data(ttl=300)  # Cache por 5 minutos para mejor rendimiento
 def obtener_serie_historica_directa(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
     """
     Obtiene serie histórica directamente usando el mismo método que funciona en las métricas
@@ -2186,7 +2187,7 @@ def obtener_serie_historica_directa(simbolo, mercado, fecha_desde, fecha_hasta, 
         'Authorization': f'Bearer {bearer_token}'
     }
     try:
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(url, headers=headers, timeout=5)  # Reducido de 15 a 5 segundos
         if response.status_code == 200:
             return response.json()
         else:
@@ -2246,45 +2247,30 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         
         st.info(f"🔍 Buscando datos históricos desde {fecha_desde_str} hasta {fecha_hasta_str}")
         
-        # Procesar cada símbolo
+        # Procesar símbolos en paralelo para mejor rendimiento
         series_data = {}  # Almacenar todas las series primero
         
-        for idx, simbolo in enumerate(simbolos):
-            progress_bar.progress((idx + 1) / total_simbolos, text=f"Procesando {simbolo}...")
-            
-            serie_encontrada = False
-            mercado_encontrado = None
-            
-            # Usar el mismo método que funciona en las métricas del portafolio
+        # Función optimizada para procesar un símbolo
+        def procesar_simbolo_optimizado(simbolo):
             try:
                 # Usar obtener_serie_historica_activo que funciona correctamente
                 serie = obtener_serie_historica_activo(simbolo, token_portador, fecha_desde_str, fecha_hasta_str)
                 
                 if serie is not None and not serie.empty and len(serie) > 10 and serie.nunique() > 1:
-                    series_data[simbolo] = serie
-                    simbolos_exitosos.append(simbolo)
-                    serie_encontrada = True
-                    mercado_encontrado = "detectado_automáticamente"
+                    return simbolo, serie, "detectado_automáticamente", None
                     
-                    # Mostrar información del símbolo exitoso
-                    if len(simbolos_exitosos) <= 10:
-                        st.success(f"✅ {simbolo} (auto-detectado): {len(serie)} puntos de datos")
-                        
             except Exception as e:
                 # Si falla, intentar con el método directo como fallback
                 mercados_a_buscar = []
                 if simbolo in simbolo_mercado_map:
-                    # Usar el mercado más probable primero
                     mercado_principal = simbolo_mercado_map[simbolo]
                     mercados_a_buscar = [mercado_principal] + [m for m in mercados if m != mercado_principal]
                 else:
-                    # Si no está en el mapeo, buscar en todos los mercados
                     mercados_a_buscar = mercados
                 
                 # Buscar en los mercados determinados hasta encontrar datos
                 for mercado in mercados_a_buscar:
                     try:
-                        # Intentar con datos ajustados primero
                         serie_historica = obtener_serie_historica_directa(
                             simbolo, mercado, fecha_desde_str, fecha_hasta_str, 'ajustada', token_portador
                         )
@@ -2308,7 +2294,7 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                                             precios.append(precio)
                                             fechas.append(fecha_parsed)
                                             
-                                except Exception as e:
+                                except Exception:
                                     continue
                             
                             if len(precios) > 10:  # Mínimo de datos válidos
@@ -2318,24 +2304,47 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                                 
                                 # Verificar que la serie tenga variación
                                 if serie.nunique() > 1:
-                                    series_data[simbolo] = serie
-                                    simbolos_exitosos.append(simbolo)
-                                    serie_encontrada = True
-                                    mercado_encontrado = mercado
+                                    return simbolo, serie, mercado, None
                                     
-                                    # Mostrar información del símbolo exitoso
-                                    if len(simbolos_exitosos) <= 10:
-                                        st.success(f"✅ {simbolo} ({mercado}): {len(serie)} puntos de datos")
-                                    break
-                            
-                    except Exception as e:
+                    except Exception:
                         continue
             
-            # Si no se encontró en ningún mercado, marcar como fallido
-            if not serie_encontrada:
-                simbolos_fallidos.append(simbolo)
-                mercado_sugerido = simbolo_mercado_map.get(simbolo, "desconocido")
-                detalles_errores[simbolo] = f"No encontrado en ningún mercado (sugerido: {mercado_sugerido})"
+            # Si no se encontró en ningún mercado
+            mercado_sugerido = simbolo_mercado_map.get(simbolo, "desconocido")
+            return simbolo, None, None, f"No encontrado en ningún mercado (sugerido: {mercado_sugerido})"
+        
+        # Procesar símbolos en paralelo usando ThreadPoolExecutor
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            # Enviar todas las tareas
+            future_to_simbolo = {
+                executor.submit(procesar_simbolo_optimizado, simbolo): simbolo 
+                for simbolo in simbolos
+            }
+            
+            # Procesar resultados conforme van completándose
+            for idx, future in enumerate(concurrent.futures.as_completed(future_to_simbolo)):
+                simbolo = future_to_simbolo[future]
+                progress_bar.progress((idx + 1) / total_simbolos, text=f"Procesando {simbolo}...")
+                
+                try:
+                    simbolo_result, serie, mercado, error = future.result()
+                    
+                    if serie is not None:
+                        series_data[simbolo_result] = serie
+                        simbolos_exitosos.append(simbolo_result)
+                        
+                        # Mostrar información del símbolo exitoso
+                        if len(simbolos_exitosos) <= 10:
+                            st.success(f"✅ {simbolo_result} ({mercado}): {len(serie)} puntos de datos")
+                    else:
+                        simbolos_fallidos.append(simbolo_result)
+                        if error:
+                            detalles_errores[simbolo_result] = error
+                            
+                except Exception as e:
+                    simbolos_fallidos.append(simbolo)
+                    detalles_errores[simbolo] = f"Error procesando: {str(e)}"
         
         # Crear DataFrame con todas las series alineadas
         if series_data:
@@ -2521,7 +2530,7 @@ def detectar_mercado_simbolo(simbolo, bearer_token):
     elif simbolo in ['AL30', 'GD30', 'GD35', 'GD38', 'GD41', 'GD46', 'GD47', 'GD48', 'GD49', 'GD50']:
         return 'Bonos'  # Bonos argentinos conocidos
     else:
-        # Intentar detectar consultando la API
+        # Intentar detectar consultando la API con timeout más corto
         mercados_test = ['bCBA', 'FCI', 'nYSE', 'nASDAQ', 'Bonos']
         for mercado in mercados_test:
             try:
@@ -2530,7 +2539,7 @@ def detectar_mercado_simbolo(simbolo, bearer_token):
                     'Accept': 'application/json',
                     'Authorization': f'Bearer {bearer_token}'
                 }
-                response = requests.get(url, headers=headers, timeout=5)
+                response = requests.get(url, headers=headers, timeout=2)  # Reducido a 2 segundos
                 if response.status_code == 200:
                     return mercado
             except Exception:
@@ -5449,19 +5458,24 @@ def obtener_parametros_operatoria_mep(token_acceso):
     Returns:
         dict: Parámetros de operatoria MEP
     """
-    # ID típico para operatoria MEP (esto puede variar según la configuración)
-    id_tipo_operatoria = 1  # Ajustar según la configuración real
-    
-    url = f'https://api.invertironline.com/api/v2/OperatoriaSimplificada/{id_tipo_operatoria}/Parametros'
+    # Usar endpoint de cotizaciones MEP para obtener parámetros
+    url = 'https://api.invertironline.com/api/v2/Cotizaciones/MEP'
     
     headers = {
         'Accept': 'application/json',
         'Authorization': f'Bearer {token_acceso}'
     }
     
+    # Datos para obtener cotización MEP
+    data = {
+        "simbolo": "AL30D",
+        "idPlazoOperatoriaCompra": 1,
+        "idPlazoOperatoriaVenta": 1
+    }
+    
     try:
         st.info(f"🔗 Consultando parámetros MEP desde: {url}")
-        response = requests.get(url, headers=headers)
+        response = requests.post(url, headers=headers, json=data)
         
         if response.status_code == 200:
             datos = response.json()
@@ -5584,7 +5598,7 @@ def obtener_estimacion_venta_mep(token_acceso, monto):
 
 def ejecutar_compra_mep(token_acceso, monto):
     """
-    Ejecuta una compra de dólares MEP
+    Ejecuta una compra de dólares MEP usando ComprarEspecieD
     
     Args:
         token_acceso (str): Token de acceso
@@ -5593,7 +5607,7 @@ def ejecutar_compra_mep(token_acceso, monto):
     Returns:
         dict: Resultado de la operación
     """
-    url = 'https://api.invertironline.com/api/v2/OperatoriaSimplificada/Comprar'
+    url = 'https://api.invertironline.com/api/v2/operar/ComprarEspecieD'
     
     headers = {
         'Content-Type': 'application/json',
@@ -5601,11 +5615,20 @@ def ejecutar_compra_mep(token_acceso, monto):
         'Authorization': f'Bearer {token_acceso}'
     }
     
-    # Datos para la operación (ajustar según la configuración real)
+    # Datos para la operación MEP (AL30D)
+    from datetime import datetime, timedelta
+    validez = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+    
     data = {
+        "mercado": "bCBA",
+        "simbolo": "AL30D",  # Bono en dólares para MEP
+        "cantidad": 0,  # Se calculará basado en el monto
+        "precio": 0,  # Precio de mercado
+        "plazo": "t0",
+        "validez": validez,
+        "tipoOrden": "precioLimite",
         "monto": monto,
-        "idTipoOperatoriaSimplificada": 1,  # ID para MEP
-        "idCuentaBancaria": 1  # ID de cuenta bancaria (ajustar según configuración)
+        "idFuente": 0
     }
     
     try:
@@ -5624,7 +5647,7 @@ def ejecutar_compra_mep(token_acceso, monto):
 
 def ejecutar_venta_mep(token_acceso, monto):
     """
-    Ejecuta una venta de dólares MEP
+    Ejecuta una venta de dólares MEP usando VenderEspecieD
     
     Args:
         token_acceso (str): Token de acceso
@@ -5633,7 +5656,7 @@ def ejecutar_venta_mep(token_acceso, monto):
     Returns:
         dict: Resultado de la operación
     """
-    url = 'https://api.invertironline.com/api/v2/OperatoriaSimplificada/VentaMepSimple'
+    url = 'https://api.invertironline.com/api/v2/operar/VenderEspecieD'
     
     headers = {
         'Content-Type': 'application/json',
@@ -5641,11 +5664,20 @@ def ejecutar_venta_mep(token_acceso, monto):
         'Authorization': f'Bearer {token_acceso}'
     }
     
-    # Datos para la operación (ajustar según la configuración real)
+    # Datos para la operación MEP (AL30D)
+    from datetime import datetime, timedelta
+    validez = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+    
     data = {
-        "monto": monto,
-        "idTipoOperatoriaSimplificada": 1,  # ID para MEP
-        "idCuentaBancaria": 1  # ID de cuenta bancaria (ajustar según configuración)
+        "mercado": "bCBA",
+        "simbolo": "AL30D",  # Bono en dólares para MEP
+        "cantidad": 0,  # Se calculará basado en el monto
+        "precio": 0,  # Precio de mercado
+        "validez": validez,
+        "idCuentaBancaria": 0,  # ID de cuenta bancaria
+        "tipoOrden": "precioLimite",
+        "plazo": "t0",
+        "idFuente": 0
     }
     
     try:
