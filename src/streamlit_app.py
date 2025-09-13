@@ -13,6 +13,8 @@ import random
 import warnings
 import streamlit.components.v1 as components
 import matplotlib.pyplot as plt
+import concurrent.futures
+from functools import lru_cache
 import time
 
 warnings.filterwarnings('ignore')
@@ -684,6 +686,7 @@ def obtener_estado_cuenta(token_portador, id_cliente=None):
         obtener_estado_cuenta._recursion_depth = 0
         return None
 
+@st.cache_data(ttl=900)  # Cache por 15 minutos para mejor rendimiento
 def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
     """
     Obtiene el portafolio de un cliente específico
@@ -699,7 +702,7 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
     url_portafolio = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}'
     encabezados = obtener_encabezado_autorizacion(token_portador)
     try:
-        respuesta = requests.get(url_portafolio, headers=encabezados, timeout=30)
+        respuesta = requests.get(url_portafolio, headers=encabezados, timeout=15)  # Reducido de 30 a 15 segundos
         if respuesta.status_code == 200:
             return respuesta.json()
         elif respuesta.status_code == 401:
@@ -718,6 +721,7 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
         st.error(f'Error al obtener portafolio: {str(e)}')
         return None
 
+@st.cache_data(ttl=900)  # Cache por 15 minutos para mejor rendimiento
 def obtener_portafolio_eeuu(token_portador, id_cliente):
     """
     Obtiene el portafolio de Estados Unidos de un cliente específico
@@ -1054,6 +1058,7 @@ def obtener_fondos_comunes(token_portador):
 
 
 
+@st.cache_data(ttl=600)  # Cache por 10 minutos para mejor rendimiento
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
     """
     Obtiene la serie histórica de precios de un título desde la API de IOL.
@@ -1075,7 +1080,7 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
     }
     
     try:
-        response = requests.get(url, headers=headers, timeout=30)
+        response = requests.get(url, headers=headers, timeout=15)  # Reducido de 30 a 15 segundos
         
         if response.status_code == 200:
             data = response.json()
@@ -1449,6 +1454,34 @@ def calcular_retorno_real_activo(simbolo, posiciones_actuales, precios_historico
         'fecha_primera_compra': posicion['fecha_compra']
     }
 
+def obtener_datos_paralelo(simbolo, token_portador, fecha_desde_str, fecha_hasta_str):
+    """
+    Función auxiliar para obtener datos de un símbolo en paralelo
+    """
+    try:
+        # Optimización: Usar mercados más probables primero
+        if len(simbolo) <= 5 and simbolo.isupper():
+            mercados = ['bCBA', 'FCI', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones']
+        else:
+            mercados = ['nYSE', 'nASDAQ', 'bCBA', 'FCI', 'rOFEX', 'Opciones']
+        
+        for mercado in mercados:
+            try:
+                serie = obtener_serie_historica_iol(
+                    token_portador, mercado, simbolo, 
+                    fecha_desde_str, fecha_hasta_str
+                )
+                
+                if serie is not None and len(serie) > 10 and serie.nunique() > 1:
+                    return simbolo, serie, mercado
+                    
+            except Exception:
+                continue
+        return simbolo, None, None
+    except Exception:
+        return simbolo, None, None
+
+@st.cache_data(ttl=600)  # Cache por 10 minutos
 def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
     """
     Obtiene datos históricos para optimización de portafolio con manejo mejorado de errores.
@@ -1464,64 +1497,48 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         fecha_desde_str = fecha_desde.strftime('%Y-%m-%d')
         fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d')
         
-        st.info(f"🔍 Buscando datos históricos desde {fecha_desde_str} hasta {fecha_hasta_str}")
-        
         # Optimización: Limitar número de símbolos para mejor rendimiento
-        if len(simbolos) > 20:
-            st.warning(f"⚠️ Limitando análisis a los primeros 20 símbolos de {len(simbolos)} para mejor rendimiento")
-            simbolos = simbolos[:20]
+        if len(simbolos) > 15:  # Reducido de 20 a 15 para mejor rendimiento
+            simbolos = simbolos[:15]
         
         # Crear barra de progreso optimizada
         progress_bar = st.progress(0)
         total_simbolos = len(simbolos)
         
-        for idx, simbolo in enumerate(simbolos):
-            # Actualizar barra de progreso
-            progress_bar.progress((idx + 1) / total_simbolos, text=f"Procesando {simbolo}...")
+        # Procesar símbolos en paralelo para mejor rendimiento
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            # Enviar todas las tareas
+            future_to_symbol = {
+                executor.submit(obtener_datos_paralelo, simbolo, token_portador, fecha_desde_str, fecha_hasta_str): simbolo 
+                for simbolo in simbolos
+            }
             
-            # Detectar mercado más probable para el símbolo
-            mercado_detectado = detectar_mercado_simbolo(simbolo, token_portador)
-            
-            # Usar mercados correctos según la API de IOL
-            # Ordenar mercados por probabilidad de éxito para optimizar búsqueda
-            if mercado_detectado:
-                mercados = [mercado_detectado, 'bCBA', 'FCI', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones']
-            else:
-                mercados = ['bCBA', 'FCI', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones']
-            
-            serie_obtenida = False
-            
-            for mercado in mercados:
+            # Procesar resultados conforme van llegando
+            for idx, future in enumerate(concurrent.futures.as_completed(future_to_symbol)):
+                simbolo = future_to_symbol[future]
+                progress_bar.progress((idx + 1) / total_simbolos, text=f"Procesando {simbolo}...")
+                
                 try:
-                    # Buscar clase D si es posible (solo para mercados tradicionales)
-                    simbolo_consulta = simbolo
-                    if mercado not in ['Opciones', 'FCI']:
-                        clase_d = obtener_clase_d(simbolo, mercado, token_portador)
-                        if clase_d:
-                            simbolo_consulta = clase_d
+                    simbolo_result, serie, mercado = future.result()
                     
-                    serie = obtener_serie_historica_iol(
-                        token_portador, mercado, simbolo_consulta, 
-                        fecha_desde_str, fecha_hasta_str
-                    )
-                    
-                    if serie is not None and len(serie) > 10:
-                        # Verificar que los datos no sean todos iguales
-                        if serie.nunique() > 1:
-                            df_precios[simbolo_consulta] = serie
-                            simbolos_exitosos.append(simbolo_consulta)
-                            serie_obtenida = True
-                            
-                            # Mostrar información del símbolo exitoso
-                            st.success(f"✅ {simbolo_consulta} ({mercado}): {len(serie)} puntos de datos")
-                            break
+                    if serie is not None:
+                        df_precios[simbolo_result] = serie
+                        simbolos_exitosos.append(simbolo_result)
+                        
+                        # Mostrar información del símbolo exitoso (solo los primeros 8)
+                        if len(simbolos_exitosos) <= 8:
+                            st.success(f"✅ {simbolo_result} ({mercado}): {len(serie)} puntos")
+                    else:
+                        simbolos_fallidos.append(simbolo_result)
                         
                 except Exception as e:
-                    detalles_errores[f"{simbolo}_{mercado}"] = str(e)
-                    continue
+                    simbolos_fallidos.append(simbolo)
+                    detalles_errores[simbolo] = str(e)
             
-            # Si IOL falló completamente, intentar con yfinance como fallback
-            if not serie_obtenida:
+        # Procesar símbolos fallidos con yfinance como fallback
+        if simbolos_fallidos:
+            st.info(f"🔄 Intentando fallback con yfinance para {len(simbolos_fallidos)} símbolos...")
+            for simbolo in simbolos_fallidos[:5]:  # Limitar a 5 para no sobrecargar
                 try:
                     serie_yf = obtener_datos_alternativos_yfinance(
                         simbolo, fecha_desde, fecha_hasta
@@ -2557,11 +2574,8 @@ def mostrar_menu_optimizaciones_avanzadas(portafolio, token_acceso, fecha_desde,
             help="Horizonte temporal para el análisis"
         )
         
-        tasa_libre_riesgo = st.number_input(
-            "Tasa Libre de Riesgo (% anual):",
-            min_value=0.0, max_value=50.0, value=4.0, step=0.1,
-            help="Tasa libre de riesgo para cálculos de Sharpe"
-        )
+        # La tasa libre de riesgo se obtendrá automáticamente del benchmark seleccionado
+        st.info("💡 **Tasa Libre de Riesgo**: Se usará automáticamente la tasa de caución del benchmark seleccionado")
     
     with col2:
         st.markdown("#### 📊 Configuración de Benchmark")
@@ -2580,11 +2594,8 @@ def mostrar_menu_optimizaciones_avanzadas(portafolio, token_acceso, fecha_desde,
             help="Rendimiento esperado del portafolio"
         )
         
-        usar_tasa_manual = st.checkbox(
-            "Usar Tasa Libre de Riesgo Manual",
-            help="Marcar para usar tasa personalizada en lugar de la del benchmark",
-            key="usar_tasa_manual_avanzada"
-        )
+        # La tasa libre de riesgo se obtiene automáticamente del benchmark
+        st.info("🎯 **Optimización Automática**: La tasa libre de riesgo se calcula automáticamente desde el benchmark")
     
     # Configuración de estrategias
     st.markdown("#### 🎯 Estrategias de Optimización")
@@ -2672,7 +2683,7 @@ def mostrar_menu_optimizaciones_avanzadas(portafolio, token_acceso, fecha_desde,
                         # Mostrar resultados comparativos
                         mostrar_resultados_optimizacion_avanzada(
                             portafolios_resultados, capital_inicial, horizonte_dias,
-                            benchmark, benchmark_return, profit_esperado, tasa_libre_riesgo,
+                            benchmark, benchmark_return, profit_esperado, benchmark_return,
                             mostrar_histogramas, mostrar_frontera
                         )
                     else:
@@ -5940,7 +5951,7 @@ def mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde,
                 risk_free_rate = benchmark_return if usar_benchmark else 0.04
                 manager_inst = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta, risk_free_rate)
                 
-                # Cargar datos
+                # Cargar datos con timeout optimizado
                 if manager_inst.load_data():
                     st.success("✅ Datos cargados correctamente")
                     
@@ -9096,7 +9107,7 @@ def mostrar_analisis_portafolio():
     st.title(f"Análisis de Portafolio - {nombre_cliente}")
     
     # Cargar datos una sola vez y cachearlos
-    @st.cache_data(ttl=300)  # Cache por 5 minutos
+    @st.cache_data(ttl=600)  # Cache por 10 minutos para mejor rendimiento
     def cargar_datos_cliente(token, cliente_id):
         """Carga y cachea los datos del cliente para evitar llamadas repetitivas"""
         portafolio_ar = obtener_portafolio(token, cliente_id, 'Argentina')
@@ -9105,9 +9116,13 @@ def mostrar_analisis_portafolio():
         estado_cuenta_eeuu = obtener_estado_cuenta_eeuu(token)
         return portafolio_ar, portafolio_eeuu, estado_cuenta_ar, estado_cuenta_eeuu
     
-    # Cargar datos con cache
+    # Cargar datos con cache y spinner optimizado
     with st.spinner("🔄 Cargando datos del cliente..."):
-        portafolio_ar, portafolio_eeuu, estado_cuenta_ar, estado_cuenta_eeuu = cargar_datos_cliente(token_acceso, id_cliente)
+        try:
+            portafolio_ar, portafolio_eeuu, estado_cuenta_ar, estado_cuenta_eeuu = cargar_datos_cliente(token_acceso, id_cliente)
+        except Exception as e:
+            st.error(f"Error cargando datos del cliente: {str(e)}")
+            return
     
     # Crear tabs con iconos
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
@@ -9269,8 +9284,113 @@ def main():
         initial_sidebar_state="expanded"
     )
     
+    # Agregar estilos CSS para mejorar la visibilidad
+    st.markdown("""
+    <style>
+    /* Mejorar contraste de texto */
+    .stSelectbox > div > div {
+        color: #262730 !important;
+        background-color: white !important;
+    }
+    
+    .stNumberInput > div > div > input {
+        color: #262730 !important;
+        background-color: white !important;
+    }
+    
+    .stTextInput > div > div > input {
+        color: #262730 !important;
+        background-color: white !important;
+    }
+    
+    .stDateInput > div > div > input {
+        color: #262730 !important;
+        background-color: white !important;
+    }
+    
+    .stRadio > div {
+        color: #262730 !important;
+    }
+    
+    .stCheckbox > div {
+        color: #262730 !important;
+    }
+    
+    /* Mejorar visibilidad de métricas */
+    .metric-container {
+        background-color: #f0f2f6;
+        border: 1px solid #e1e5e9;
+        border-radius: 8px;
+        padding: 10px;
+        margin: 5px 0;
+    }
+    
+    /* Mejorar contraste de sidebar */
+    .css-1d391kg {
+        background-color: #f8f9fa !important;
+    }
+    
+    /* Mejorar visibilidad de tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        background-color: #f8f9fa;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        color: #262730 !important;
+        background-color: #f8f9fa !important;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        color: #1f77b4 !important;
+        background-color: white !important;
+    }
+    
+    /* Mejorar visibilidad de expanders */
+    .streamlit-expanderHeader {
+        color: #262730 !important;
+        background-color: #f8f9fa !important;
+    }
+    
+    /* Mejorar contraste de botones */
+    .stButton > button {
+        color: white !important;
+        background-color: #1f77b4 !important;
+        border: none !important;
+    }
+    
+    .stButton > button:hover {
+        background-color: #0d5aa7 !important;
+    }
+    
+    /* Mejorar visibilidad de info boxes */
+    .stInfo {
+        background-color: #e7f3ff !important;
+        border-left: 4px solid #1f77b4 !important;
+        color: #262730 !important;
+    }
+    
+    .stSuccess {
+        background-color: #d4edda !important;
+        border-left: 4px solid #28a745 !important;
+        color: #262730 !important;
+    }
+    
+    .stWarning {
+        background-color: #fff3cd !important;
+        border-left: 4px solid #ffc107 !important;
+        color: #262730 !important;
+    }
+    
+    .stError {
+        background-color: #f8d7da !important;
+        border-left: 4px solid #dc3545 !important;
+        color: #262730 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
     # Configurar cache para mejor rendimiento
-    st.cache_data.clear()
+    # st.cache_data.clear()  # Comentado para mantener cache entre sesiones
     
     st.title("📊 IOL Portfolio Analyzer")
     st.markdown("### Analizador Avanzado de Portafolios IOL")
