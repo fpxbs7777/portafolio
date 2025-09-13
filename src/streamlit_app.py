@@ -9931,7 +9931,7 @@ def mostrar_analisis_portafolio():
     # Cargar datos con cache y spinner optimizado
     with st.spinner("🔄 Cargando datos del cliente..."):
         try:
-        portafolio_ar, portafolio_eeuu, estado_cuenta_ar, estado_cuenta_eeuu = cargar_datos_cliente(token_acceso, id_cliente)
+            portafolio_ar, portafolio_eeuu, estado_cuenta_ar, estado_cuenta_eeuu = cargar_datos_cliente(token_acceso, id_cliente)
         except Exception as e:
             st.error(f"Error cargando datos del cliente: {str(e)}")
             return
