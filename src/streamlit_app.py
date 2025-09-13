@@ -1187,7 +1187,7 @@ def obtener_datos_alternativos_yfinance(simbolo, fecha_desde, fecha_hasta):
     except Exception:
         return None
 
-def obtener_operaciones_activo(token_portador, simbolo, fecha_desde=None, fecha_hasta=None):
+def obtener_operaciones_activo(token_portador, simbolo, fecha_desde=None, fecha_hasta=None, id_cliente=None):
     """
     Obtiene todas las operaciones de un activo específico desde la API de IOL.
     
@@ -1196,6 +1196,7 @@ def obtener_operaciones_activo(token_portador, simbolo, fecha_desde=None, fecha_
         simbolo (str): Símbolo del activo
         fecha_desde (str): Fecha desde (YYYY-MM-DD), por defecto 2 años atrás
         fecha_hasta (str): Fecha hasta (YYYY-MM-DD), por defecto hoy
+        id_cliente (str): ID del cliente para filtrar operaciones
         
     Returns:
         list: Lista de operaciones del activo
@@ -1217,6 +1218,8 @@ def obtener_operaciones_activo(token_portador, simbolo, fecha_desde=None, fecha_
         'filtro.fechaHasta': fecha_hasta,
         'filtro.pais': 'argentina'
     }
+    if id_cliente:
+        params['filtro.cuentaComitente'] = id_cliente
     
     try:
         url = "https://api.invertironline.com/api/v2/operaciones"
@@ -1238,7 +1241,7 @@ def obtener_operaciones_activo(token_portador, simbolo, fecha_desde=None, fecha_
         print(f"Error al obtener operaciones para {simbolo}: {str(e)}")
         return []
 
-def reconstruir_composicion_portafolio(token_portador, portafolio_actual, fecha_desde=None, fecha_hasta=None):
+def reconstruir_composicion_portafolio(token_portador, portafolio_actual, fecha_desde=None, fecha_hasta=None, id_cliente=None):
     """
     Reconstruye la composición del portafolio a lo largo del tiempo basándose en todas las operaciones.
     
@@ -1247,6 +1250,7 @@ def reconstruir_composicion_portafolio(token_portador, portafolio_actual, fecha_
         portafolio_actual (dict): Portafolio actual con estructura {'activos': [...]}
         fecha_desde (str): Fecha desde para reconstruir
         fecha_hasta (str): Fecha hasta para reconstruir
+        id_cliente (str): ID del cliente para filtrar operaciones
         
     Returns:
         dict: Composición del portafolio por fecha
@@ -1272,7 +1276,7 @@ def reconstruir_composicion_portafolio(token_portador, portafolio_actual, fecha_
     todas_operaciones = []
     
     for simbolo in portafolio_dict.keys():
-        operaciones = obtener_operaciones_activo(token_portador, simbolo, fecha_desde, fecha_hasta)
+        operaciones = obtener_operaciones_activo(token_portador, simbolo, fecha_desde, fecha_hasta, id_cliente)
         for op in operaciones:
             op['simbolo_original'] = simbolo
             todas_operaciones.append(op)
@@ -1492,6 +1496,7 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         simbolos_exitosos = []
         simbolos_fallidos = []
         detalles_errores = {}
+        serie_obtenida = False
         
         # Convertir fechas a string en formato correcto
         fecha_desde_str = fecha_desde.strftime('%Y-%m-%d')
@@ -2348,7 +2353,7 @@ def optimize_portfolio(returns, risk_free_rate=0.0, target_return=None):
         st.error(f"❌ Error en optimización: {str(e)}. Usando pesos iguales.")
         return np.array([1/n_assets] * n_assets)
 
-def mostrar_resumen_operaciones_reales(portafolio, token_portador, portfolio_id=""):
+def mostrar_resumen_operaciones_reales(portafolio, token_portador, portfolio_id="", id_cliente=None):
     """
     Muestra un resumen de las operaciones reales de compra/venta del portafolio.
     """
@@ -2362,7 +2367,7 @@ def mostrar_resumen_operaciones_reales(portafolio, token_portador, portfolio_id=
         with st.spinner("🔄 Analizando operaciones reales del portafolio..."):
             # Reconstruir composición del portafolio
             composicion_por_fecha, posiciones_actuales = reconstruir_composicion_portafolio(
-                token_portador, portafolio, fecha_desde, fecha_hasta
+                token_portador, portafolio, fecha_desde, fecha_hasta, id_cliente
             )
         
         if not posiciones_actuales:
@@ -3501,7 +3506,7 @@ def validar_datos_financieros(returns, min_observaciones=30):
     except Exception as e:
         return False, f"Error validando datos: {str(e)}"
 
-def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252):
+def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252, id_cliente=None):
     """
     Calcula métricas clave de desempeño para un portafolio de inversión usando datos históricos.
     
@@ -3536,7 +3541,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     print("🔄 Reconstruyendo composición del portafolio basándose en operaciones reales...")
     try:
         composicion_por_fecha, posiciones_actuales = reconstruir_composicion_portafolio(
-            token_portador, portafolio, fecha_desde, fecha_hasta
+            token_portador, portafolio, fecha_desde, fecha_hasta, id_cliente
         )
         print(f"✅ Composición reconstruida para {len(composicion_por_fecha)} fechas")
         
@@ -3851,7 +3856,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     }
 
 # --- Funciones de Visualización ---
-def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
+def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_cliente=None):
     st.markdown("### 📈 Resumen del Portafolio")
     
     activos = portafolio.get('activos', [])
@@ -4911,7 +4916,7 @@ def ejecutar_venta_mep(token_acceso, monto):
 
 def obtener_historico_mep(token_acceso, fecha_desde, fecha_hasta):
     """
-    Obtiene el histórico del dólar MEP usando AL30 desde la API de IOL
+    Obtiene el histórico del dólar MEP calculado como AL30/AL30D desde la API de IOL
     
     Args:
         token_acceso (str): Token de acceso para la autenticación
@@ -4919,34 +4924,82 @@ def obtener_historico_mep(token_acceso, fecha_desde, fecha_hasta):
         fecha_hasta (str): Fecha hasta en formato YYYY-MM-DD
     
     Returns:
-        list: Lista de datos históricos del AL30
+        dict: Diccionario con datos históricos del MEP calculado
     """
-    url = f'https://api.invertironline.com/api/v2/bCBA/Titulos/al30/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/ajustada'
-    
-    headers = {
-        'Accept': 'application/json',
-        'Authorization': f'Bearer {token_acceso}'
-    }
-    
     try:
-        st.info(f"🔗 Consultando histórico AL30 desde: {url}")
-        response = requests.get(url, headers=headers)
+        st.info(f"🔗 Consultando histórico MEP desde {fecha_desde} hasta {fecha_hasta}")
         
-        if response.status_code == 200:
-            datos_historicos = response.json()
-            st.success(f"✅ Se obtuvieron {len(datos_historicos)} registros históricos")
-            return datos_historicos
-        elif response.status_code == 401:
-            st.error("❌ Error de autorización: Token inválido o expirado")
-            st.warning("💡 Verifique que su sesión esté activa y tenga permisos para acceder a datos históricos")
+        # Obtener datos históricos de AL30 (pesos)
+        st.info("📊 Obteniendo datos históricos de AL30 (pesos)...")
+        datos_al30 = obtener_serie_historica_iol(token_acceso, "bCBA", "al30", fecha_desde, fecha_hasta, "ajustada")
+        
+        # Obtener datos históricos de AL30D (dólares)
+        st.info("📊 Obteniendo datos históricos de AL30D (dólares)...")
+        datos_al30d = obtener_serie_historica_iol(token_acceso, "bCBA", "al30d", fecha_desde, fecha_hasta, "ajustada")
+        
+        if not datos_al30 or not datos_al30d:
+            st.warning("⚠️ No se pudieron obtener datos completos para calcular el MEP")
+            if not datos_al30:
+                st.warning("❌ No hay datos de AL30 (pesos)")
+            if not datos_al30d:
+                st.warning("❌ No hay datos de AL30D (dólares)")
             return None
-        else:
-            st.error(f'Error obteniendo histórico MEP: {response.status_code}')
-            st.error(f'Respuesta: {response.text}')
+        
+        # Crear DataFrames para facilitar el cálculo
+        df_al30 = pd.DataFrame(datos_al30)
+        df_al30d = pd.DataFrame(datos_al30d)
+        
+        # Convertir fechas a datetime
+        df_al30['fecha'] = pd.to_datetime(df_al30['fecha'])
+        df_al30d['fecha'] = pd.to_datetime(df_al30d['fecha'])
+        
+        # Hacer merge por fecha para alinear los datos
+        df_merged = pd.merge(df_al30, df_al30d, on='fecha', suffixes=('_al30', '_al30d'))
+        
+        # Calcular MEP = AL30 / AL30D
+        df_merged['mep'] = df_merged['precio_al30'] / df_merged['precio_al30d']
+        
+        # Filtrar datos válidos (MEP > 0)
+        df_merged = df_merged[df_merged['mep'] > 0].copy()
+        
+        if len(df_merged) == 0:
+            st.warning("⚠️ No se pudieron calcular valores de MEP válidos")
             return None
-            
-    except requests.exceptions.RequestException as e:
-        st.error(f'Error en la conexión: {e}')
+        
+        # Ordenar por fecha
+        df_merged = df_merged.sort_values('fecha')
+        
+        st.success(f"✅ Se calcularon {len(df_merged)} valores de MEP históricos")
+        
+        # Convertir a formato esperado por la interfaz
+        datos_mep = []
+        for _, row in df_merged.iterrows():
+            datos_mep.append({
+                'fecha': row['fecha'].strftime('%Y-%m-%d'),
+                'fechaHora': row['fecha'].strftime('%Y-%m-%dT%H:%M:%S'),
+                'mep': row['mep'],
+                'al30_pesos': row['precio_al30'],
+                'al30d_dolares': row['precio_al30d'],
+                'ultimoPrecio': row['mep'],
+                'variacion': 0,  # Se calculará si es necesario
+                'moneda': 'peso_Argentino'
+            })
+        
+        return {
+            'datos': datos_mep,
+            'dataframe': df_merged,
+            'resumen': {
+                'total_registros': len(datos_mep),
+                'fecha_inicio': df_merged['fecha'].min().strftime('%Y-%m-%d'),
+                'fecha_fin': df_merged['fecha'].max().strftime('%Y-%m-%d'),
+                'mep_promedio': df_merged['mep'].mean(),
+                'mep_min': df_merged['mep'].min(),
+                'mep_max': df_merged['mep'].max()
+            }
+        }
+        
+    except Exception as e:
+        st.error(f"❌ Error calculando histórico MEP: {str(e)}")
         return None
 
 def mostrar_cotizaciones_mercado(token_acceso):
@@ -5003,73 +5056,94 @@ def mostrar_cotizaciones_mercado(token_acceso):
                             fecha_hasta_hist.strftime('%Y-%m-%d')
                         )
                     
-                    if datos_historicos:
-                        st.success(f"✅ Se obtuvieron {len(datos_historicos)} registros históricos")
+                    if datos_historicos and datos_historicos.get('datos'):
+                        resumen = datos_historicos.get('resumen', {})
+                        df_historico = datos_historicos.get('dataframe')
                         
-                        # Convertir a DataFrame
-                        df_historico = pd.DataFrame(datos_historicos)
-                        df_historico['fechaHora'] = pd.to_datetime(df_historico['fechaHora'])
-                        df_historico = df_historico.sort_values('fechaHora')
+                        st.success(f"✅ Se calcularon {resumen.get('total_registros', 0)} valores de MEP históricos")
                         
-                        # Mostrar métricas principales
+                        # Mostrar métricas principales del MEP
                         col1, col2, col3, col4 = st.columns(4)
                         with col1:
-                            precio_actual = df_historico['ultimoPrecio'].iloc[-1] if len(df_historico) > 0 else 0
-                            st.metric("Precio Actual", f"${precio_actual:,.2f}")
+                            mep_actual = df_historico['mep'].iloc[-1] if len(df_historico) > 0 else 0
+                            st.metric("MEP Actual", f"${mep_actual:,.2f}")
                         with col2:
-                            precio_max = df_historico['maximo'].max() if len(df_historico) > 0 else 0
-                            st.metric("Precio Máximo", f"${precio_max:,.2f}")
+                            mep_max = resumen.get('mep_max', 0)
+                            st.metric("MEP Máximo", f"${mep_max:,.2f}")
                         with col3:
-                            precio_min = df_historico['minimo'].min() if len(df_historico) > 0 else 0
-                            st.metric("Precio Mínimo", f"${precio_min:,.2f}")
+                            mep_min = resumen.get('mep_min', 0)
+                            st.metric("MEP Mínimo", f"${mep_min:,.2f}")
                         with col4:
-                            variacion_total = ((precio_actual - df_historico['ultimoPrecio'].iloc[0]) / df_historico['ultimoPrecio'].iloc[0] * 100) if len(df_historico) > 0 else 0
-                            st.metric("Variación Total", f"{variacion_total:+.2f}%")
+                            mep_promedio = resumen.get('mep_promedio', 0)
+                            st.metric("MEP Promedio", f"${mep_promedio:,.2f}")
+                        
+                        # Mostrar información adicional
+                        st.info(f"📅 Período: {resumen.get('fecha_inicio', 'N/A')} a {resumen.get('fecha_fin', 'N/A')}")
                         
                         # Gráfico con Plotly
                         fig = go.Figure()
                         
-                        # Línea de precio
+                        # Línea de MEP calculado
                         fig.add_trace(go.Scatter(
-                            x=df_historico['fechaHora'],
-                            y=df_historico['ultimoPrecio'],
+                            x=df_historico['fecha'],
+                            y=df_historico['mep'],
                             mode='lines',
-                            name='Precio AL30',
+                            name='Dólar MEP (AL30/AL30D)',
                             line=dict(color='#1f77b4', width=2),
-                            hovertemplate='<b>Fecha:</b> %{x}<br><b>Precio:</b> $%{y:,.2f}<extra></extra>'
+                            hovertemplate='<b>Fecha:</b> %{x}<br><b>MEP:</b> $%{y:,.2f}<br><b>AL30:</b> $%{customdata[0]:,.2f}<br><b>AL30D:</b> $%{customdata[1]:,.2f}<extra></extra>',
+                            customdata=list(zip(df_historico['precio_al30'], df_historico['precio_al30d']))
                         ))
                         
-                        # Línea de precio máximo
+                        # Línea de AL30 (pesos) para referencia
                         fig.add_trace(go.Scatter(
-                            x=df_historico['fechaHora'],
-                            y=df_historico['maximo'],
+                            x=df_historico['fecha'],
+                            y=df_historico['precio_al30'],
                             mode='lines',
-                            name='Máximo',
+                            name='AL30 (Pesos)',
                             line=dict(color='#ff7f0e', width=1, dash='dash'),
                             opacity=0.7,
-                            hovertemplate='<b>Fecha:</b> %{x}<br><b>Máximo:</b> $%{y:,.2f}<extra></extra>'
+                            yaxis='y2',
+                            hovertemplate='<b>Fecha:</b> %{x}<br><b>AL30:</b> $%{y:,.2f}<extra></extra>'
                         ))
                         
-                        # Línea de precio mínimo
+                        # Línea de AL30D (dólares) para referencia
                         fig.add_trace(go.Scatter(
-                            x=df_historico['fechaHora'],
-                            y=df_historico['minimo'],
+                            x=df_historico['fecha'],
+                            y=df_historico['precio_al30d'],
                             mode='lines',
-                            name='Mínimo',
+                            name='AL30D (Dólares)',
                             line=dict(color='#2ca02c', width=1, dash='dash'),
                             opacity=0.7,
-                            hovertemplate='<b>Fecha:</b> %{x}<br><b>Mínimo:</b> $%{y:,.2f}<extra></extra>'
+                            yaxis='y2',
+                            hovertemplate='<b>Fecha:</b> %{x}<br><b>AL30D:</b> $%{y:,.2f}<extra></extra>'
                         ))
                         
-                        # Configurar layout
+                        # Configurar layout con eje Y secundario
                         fig.update_layout(
-                            title='📈 Evolución Histórica del AL30 (Dólar MEP)',
+                            title='📈 Evolución Histórica del Dólar MEP (AL30/AL30D)',
                             xaxis_title='Fecha',
-                            yaxis_title='Precio ($)',
+                            yaxis=dict(
+                                title='Dólar MEP ($)',
+                                side='left',
+                                color='#1f77b4'
+                            ),
+                            yaxis2=dict(
+                                title='Precio Títulos ($)',
+                                side='right',
+                                overlaying='y',
+                                color='#ff7f0e'
+                            ),
                             hovermode='x unified',
                             showlegend=True,
                             height=500,
-                            template='plotly_white'
+                            template='plotly_white',
+                            legend=dict(
+                                orientation="h",
+                                yanchor="bottom",
+                                y=1.02,
+                                xanchor="right",
+                                x=1
+                            )
                         )
                         
                         # Formatear ejes
@@ -5078,23 +5152,30 @@ def mostrar_cotizaciones_mercado(token_acceso):
                             tickangle=45
                         )
                         fig.update_yaxes(
-                            tickformat='$,.0f'
+                            tickformat='$,.0f',
+                            title_standoff=20
+                        )
+                        fig.update_yaxes(
+                            tickformat='$,.0f',
+                            title_standoff=20,
+                            secondary_y=True
                         )
                         
                         st.plotly_chart(fig, use_container_width=True)
                         
-                        # Tabla de datos
-                        st.subheader("📋 Datos Históricos")
-                        df_display = df_historico[['fechaHora', 'ultimoPrecio', 'variacion', 'maximo', 'minimo', 'volumenNominal']].copy()
-                        df_display.columns = ['Fecha', 'Precio', 'Variación', 'Máximo', 'Mínimo', 'Volumen']
-                        df_display['Fecha'] = df_display['Fecha'].dt.strftime('%d/%m/%Y %H:%M')
-                        df_display['Precio'] = df_display['Precio'].apply(lambda x: f"${x:,.2f}")
-                        df_display['Máximo'] = df_display['Máximo'].apply(lambda x: f"${x:,.2f}")
-                        df_display['Mínimo'] = df_display['Mínimo'].apply(lambda x: f"${x:,.2f}")
-                        df_display['Variación'] = df_display['Variación'].apply(lambda x: f"{x:+.2f}%")
-                        df_display['Volumen'] = df_display['Volumen'].apply(lambda x: f"{x:,.0f}")
+                        # Tabla de datos del MEP
+                        st.subheader("📋 Datos Históricos del MEP")
+                        df_display = df_historico[['fecha', 'mep', 'precio_al30', 'precio_al30d']].copy()
+                        df_display.columns = ['Fecha', 'MEP ($)', 'AL30 Pesos ($)', 'AL30D Dólares ($)']
+                        df_display['Fecha'] = df_display['Fecha'].dt.strftime('%d/%m/%Y')
+                        df_display['MEP ($)'] = df_display['MEP ($)'].apply(lambda x: f"${x:,.2f}")
+                        df_display['AL30 Pesos ($)'] = df_display['AL30 Pesos ($)'].apply(lambda x: f"${x:,.2f}")
+                        df_display['AL30D Dólares ($)'] = df_display['AL30D Dólares ($)'].apply(lambda x: f"${x:,.2f}")
                         
                         st.dataframe(df_display, use_container_width=True, height=300)
+                        
+                        # Información adicional
+                        st.info("💡 **Cálculo del MEP**: Dólar MEP = Precio AL30 (pesos) ÷ Precio AL30D (dólares)")
                         
                 else:
                         st.error("❌ No se pudo obtener el histórico del AL30")
@@ -9045,7 +9126,15 @@ def mostrar_operaciones_reales():
     if st.button("🔍 Analizar Operaciones y Composición", type="primary"):
         with st.spinner("Obteniendo operaciones y unificando composición..."):
             # Obtener ID del cliente seleccionado
-            id_cliente = st.session_state.get('cliente_seleccionado', {}).get('id')
+            cliente = st.session_state.get('cliente_seleccionado', {})
+            id_cliente = cliente.get('numeroCliente', cliente.get('id')) if cliente else None
+            
+            # Debug: mostrar información del cliente
+            if cliente:
+                st.info(f"🔍 Cliente seleccionado: {cliente.get('apellidoYNombre', 'N/A')} - ID: {id_cliente}")
+            else:
+                st.warning("⚠️ No hay cliente seleccionado")
+            
             operaciones = obtener_movimientos_reales(
                 token_acceso, 
                 id_cliente=id_cliente,
@@ -9353,7 +9442,8 @@ def mostrar_analisis_portafolio():
         )
         
         if portafolio_seleccionado[1]:
-            mostrar_resumen_operaciones_reales(portafolio_seleccionado[1], token_acceso, "operaciones_reales")
+            # Usar la función que incluye el ID del cliente
+            mostrar_resumen_operaciones_reales(portafolio_seleccionado[1], token_acceso, "operaciones_reales", id_cliente)
         else:
             st.warning("⚠️ No hay datos disponibles para el portafolio seleccionado")
     
@@ -9421,7 +9511,7 @@ def main():
     
     /* Mejorar visibilidad de tabs */
     .stTabs [data-baseweb="tab-list"] {
-        background-color: #f8f9fa;
+        background-color: #f8f9fa !important;
     }
     
     .stTabs [data-baseweb="tab"] {
@@ -9429,9 +9519,61 @@ def main():
         background-color: #f8f9fa !important;
     }
     
+    .stTabs [data-baseweb="tab"] > div {
+        color: #262730 !important;
+        background-color: #f8f9fa !important;
+    }
+    
+    .stTabs [data-baseweb="tab"] span {
+        color: #262730 !important;
+    }
+    
     .stTabs [aria-selected="true"] {
         color: #1f77b4 !important;
         background-color: white !important;
+    }
+    
+    .stTabs [aria-selected="true"] > div {
+        color: #1f77b4 !important;
+        background-color: white !important;
+    }
+    
+    .stTabs [aria-selected="true"] span {
+        color: #1f77b4 !important;
+    }
+    
+    /* Forzar contraste en todos los elementos de tabs */
+    .stTabs button {
+        color: #262730 !important;
+        background-color: #f8f9fa !important;
+    }
+    
+    .stTabs button[aria-selected="true"] {
+        color: #1f77b4 !important;
+        background-color: white !important;
+    }
+    
+    /* Reglas adicionales para asegurar visibilidad del texto en tabs */
+    .stTabs [data-baseweb="tab"] p {
+        color: #262730 !important;
+    }
+    
+    .stTabs [aria-selected="true"] p {
+        color: #1f77b4 !important;
+    }
+    
+    /* Forzar contraste en elementos de texto dentro de tabs */
+    .stTabs * {
+        color: inherit !important;
+    }
+    
+    /* Específico para tabs no seleccionados */
+    .stTabs [data-baseweb="tab"]:not([aria-selected="true"]) {
+        color: #262730 !important;
+    }
+    
+    .stTabs [data-baseweb="tab"]:not([aria-selected="true"]) * {
+        color: #262730 !important;
     }
     
     /* Mejorar visibilidad de expanders */
