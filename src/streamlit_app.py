@@ -1016,6 +1016,7 @@ async def obtener_serie_historica_directa_async(simbolo, mercado, fecha_desde, f
 async def obtener_historico_mep_async(token_acceso, fecha_desde, fecha_hasta):
     """
     Versión asíncrona para obtener el histórico del dólar MEP calculado como AL30/AL30D
+    Usa el método estándar que funciona correctamente para las métricas del portafolio
     
     Args:
         token_acceso (str): Token de acceso para la autenticación
@@ -1028,56 +1029,27 @@ async def obtener_historico_mep_async(token_acceso, fecha_desde, fecha_hasta):
     try:
         st.info(f"🔗 Consultando histórico MEP desde {fecha_desde} hasta {fecha_hasta}")
         
-        # Usar el método directo para obtener series históricas
+        # Usar el método estándar que funciona correctamente
         tickers_especificos = ['AL30', 'AL30D']
-        mercado = 'bCBA'
-        ajustada = 'SinAjustar'
-        
         datos_series = {}
         
-        # Crear tareas asíncronas para obtener ambas series en paralelo
-        tasks = []
+        # Obtener datos para cada ticker usando el método estándar
         for simbolo in tickers_especificos:
-            task = obtener_serie_historica_directa_async(
-                simbolo, mercado, fecha_desde, fecha_hasta, ajustada, token_acceso
-            )
-            tasks.append((simbolo, task))
-        
-        # Ejecutar todas las tareas en paralelo
-        for simbolo, task in tasks:
             st.info(f"📊 Obteniendo datos históricos de {simbolo}...")
-            serie_historica = await task
             
-            if serie_historica and len(serie_historica) > 0:
-                # Procesar los datos de la serie histórica
-                precios = []
-                fechas = []
+            # Usar el método que funciona correctamente para las métricas del portafolio
+            serie = obtener_serie_historica_activo(simbolo, token_acceso, fecha_desde, fecha_hasta)
+            
+            if serie is not None and not serie.empty and len(serie) > 0:
+                # Convertir serie a listas
+                precios = serie.values.tolist()
+                fechas = serie.index.tolist()
                 
-                for item in serie_historica:
-                    try:
-                        precio = item.get('ultimoPrecio')
-                        if not precio or precio == 0:
-                            precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
-                        
-                        fecha_str = item.get('fechaHora') or item.get('fecha')
-                        
-                        if precio is not None and precio > 0 and fecha_str:
-                            fecha_parsed = parse_datetime_flexible(fecha_str)
-                            if fecha_parsed is not None:
-                                precios.append(precio)
-                                fechas.append(fecha_parsed)
-                                
-                    except Exception as e:
-                        continue
-                
-                if len(precios) > 0:
-                    datos_series[simbolo] = {
-                        'precios': precios,
-                        'fechas': fechas
-                    }
-                    st.success(f"✅ {simbolo}: {len(precios)} puntos de datos")
-                else:
-                    st.warning(f"⚠️ {simbolo}: No se encontraron datos válidos")
+                datos_series[simbolo] = {
+                    'precios': precios,
+                    'fechas': fechas
+                }
+                st.success(f"✅ {simbolo}: {len(precios)} puntos de datos")
             else:
                 st.warning(f"⚠️ {simbolo}: No se pudieron obtener datos históricos")
         
@@ -1962,7 +1934,8 @@ def obtener_metricas_portafolio_reales(portafolio, token_acceso, fecha_desde, fe
 
 def obtener_serie_historica_activo(simbolo, token_acceso, fecha_desde, fecha_hasta):
     """
-    Obtiene la serie histórica de un activo específico
+    Obtiene la serie histórica de un activo específico usando el método estándar
+    Esta es la función principal que debe usarse en toda la aplicación para obtener series históricas
     """
     try:
         # Detectar mercado del símbolo
@@ -1991,6 +1964,22 @@ def obtener_serie_historica_activo(simbolo, token_acceso, fecha_desde, fecha_has
     except Exception as e:
         st.warning(f"Error obteniendo serie histórica para {simbolo}: {str(e)}")
         return None
+
+def obtener_serie_historica_estandar(simbolo, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Función estándar para obtener series históricas en toda la aplicación
+    Esta función debe usarse como reemplazo de otros métodos de obtención de datos históricos
+    
+    Args:
+        simbolo (str): Símbolo del activo
+        token_acceso (str): Token de autenticación
+        fecha_desde (str): Fecha desde en formato YYYY-MM-DD
+        fecha_hasta (str): Fecha hasta en formato YYYY-MM-DD
+    
+    Returns:
+        pandas.Series: Serie histórica con fechas como índice y precios como valores
+    """
+    return obtener_serie_historica_activo(simbolo, token_acceso, fecha_desde, fecha_hasta)
 
 def obtener_datos_paralelo(simbolo, token_portador, fecha_desde_str, fecha_hasta_str):
     """
@@ -2257,8 +2246,8 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
             
             # Usar el mismo método que funciona en las métricas del portafolio
             try:
-                # Usar obtener_serie_historica_activo que funciona correctamente
-                serie = obtener_serie_historica_activo(simbolo, token_portador, fecha_desde_str, fecha_hasta_str)
+                # Usar el método estándar que funciona correctamente
+                serie = obtener_serie_historica_estandar(simbolo, token_portador, fecha_desde_str, fecha_hasta_str)
                 
                 if serie is not None and not serie.empty and len(serie) > 10 and serie.nunique() > 1:
                     series_data[simbolo] = serie
@@ -9039,8 +9028,6 @@ def obtener_movimientos_reales(access_token, id_cliente=None, fecha_desde=None, 
     
     try:
         st.info(f"🔗 Consultando operaciones desde {fecha_desde or 'inicio'} hasta {fecha_hasta or 'actual'}")
-        st.info(f"🔗 URL: {url}")
-        st.info(f"🔗 Parámetros: {params}")
         
         response = requests.get(url, headers=headers, params=params)
         
@@ -9050,7 +9037,6 @@ def obtener_movimientos_reales(access_token, id_cliente=None, fecha_desde=None, 
             
             # Mostrar información de debug
             if operaciones:
-                st.info(f"🔍 Primeras 3 operaciones: {operaciones[:3]}")
                 simbolos_encontrados = list(set([op.get('simbolo', 'N/A') for op in operaciones]))
                 st.info(f"🔍 Símbolos encontrados: {simbolos_encontrados}")
             else:
@@ -9082,7 +9068,7 @@ def calcular_evolucion_portafolio_unificada(token_acceso, id_cliente, fecha_desd
     """
     try:
         # Obtener operaciones reales
-        operaciones = obtener_movimientos_reales(token_acceso, fecha_desde, fecha_hasta)
+        operaciones = obtener_movimientos_reales(token_acceso, id_cliente, fecha_desde, fecha_hasta)
         if not operaciones:
             return None
         
@@ -9827,10 +9813,14 @@ def unificar_composicion_portafolio(portafolio_actual, operaciones, token_acceso
     composicion_unificada = {}
     
     for simbolo in simbolos_totales:
-        # Obtener datos históricos del símbolo
-        datos_historicos = obtener_serie_historica_iol(token_acceso, simbolo, fecha_desde, fecha_hasta)
+        # Obtener datos históricos del símbolo usando el método estándar
+        serie_historica = obtener_serie_historica_activo(simbolo, token_acceso, fecha_desde, fecha_hasta)
         
-        if datos_historicos:
+        if serie_historica is not None and not serie_historica.empty:
+            # Convertir serie a diccionario para compatibilidad
+            datos_historicos = {}
+            for fecha, precio in serie_historica.items():
+                datos_historicos[fecha.strftime('%Y-%m-%d')] = {'cierre': precio}
             # Reconstruir posición basada en operaciones
             posicion_operaciones = 0
             fechas_operaciones = []
@@ -9852,15 +9842,13 @@ def unificar_composicion_portafolio(portafolio_actual, operaciones, token_acceso
             if simbolo in portafolio_actual:
                 posicion_actual = portafolio_actual[simbolo].get('cantidad', 0)
             
-            # Crear serie temporal de composición
-            fechas_unicas = sorted(set(fechas_operaciones + [pd.to_datetime(fecha_desde), pd.to_datetime(fecha_hasta)]))
+            # Crear serie temporal de composición usando las fechas de la serie histórica
             composicion_por_fecha = {}
             precios_por_fecha = {}
             
-            for fecha in fechas_unicas:
-                # Buscar precio más cercano en datos históricos
+            # Usar las fechas de la serie histórica como base
+            for fecha, precio in serie_historica.items():
                 fecha_str = fecha.strftime('%Y-%m-%d')
-                precio = datos_historicos.get(fecha_str, {}).get('cierre', 0)
                 precios_por_fecha[fecha_str] = precio
                 
                 # Calcular posición acumulada hasta esa fecha
@@ -10824,3 +10812,4 @@ def main():
 
 if __name__ == "__main__":
     main() 
+    
