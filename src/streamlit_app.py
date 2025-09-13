@@ -1739,6 +1739,19 @@ def reconstruir_composicion_portafolio(token_portador, portafolio_actual, fecha_
     
     return composicion_por_fecha, posiciones_actuales
 
+def es_cuenta_eeuu(cuenta):
+    """
+    Determina si una cuenta es de EEUU basándose en su moneda
+    """
+    moneda = cuenta.get('moneda', '').lower()
+    return 'dolar' in moneda or 'usd' in moneda or 'dollar' in moneda
+
+def obtener_composicion_historica_portafolio(token_acceso, activos, fecha_desde, fecha_hasta):
+    """
+    Alias para reconstruir_composicion_portafolio para mantener compatibilidad
+    """
+    return reconstruir_composicion_portafolio(token_acceso, activos, fecha_desde, fecha_hasta, None)
+
 def calcular_retorno_real_activo(simbolo, posiciones_actuales, precios_historicos):
     """
     Calcula el retorno real de un activo basándose en su historial de operaciones.
@@ -2152,9 +2165,20 @@ def calcular_indicadores_tecnicos_avanzados(precios, periodo=14):
 @st.cache_data(ttl=600)  # Cache por 10 minutos
 def obtener_serie_historica_directa(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
     """
-    Obtiene serie histórica directamente usando el método proporcionado por el usuario
+    Obtiene serie histórica directamente usando el mismo método que funciona en las métricas
     """
-    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    # Mapear nombres de mercados a los correctos de IOL (igual que en obtener_serie_historica)
+    mercados_mapping = {
+        'BCBA': 'bCBA',
+        'NYSE': 'nYSE', 
+        'NASDAQ': 'nASDAQ',
+        'ROFEX': 'rOFEX',
+        'Merval': 'bCBA'  # Merval no existe, usar bCBA
+    }
+    
+    mercado_correcto = mercados_mapping.get(mercado, mercado)
+    
+    url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
     headers = {
         'Accept': 'application/json',
         'Authorization': f'Bearer {bearer_token}'
@@ -2229,65 +2253,81 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
             serie_encontrada = False
             mercado_encontrado = None
             
-            # Determinar mercados a buscar basado en el mapeo
-            mercados_a_buscar = []
-            if simbolo in simbolo_mercado_map:
-                # Usar el mercado más probable primero
-                mercado_principal = simbolo_mercado_map[simbolo]
-                mercados_a_buscar = [mercado_principal] + [m for m in mercados if m != mercado_principal]
-            else:
-                # Si no está en el mapeo, buscar en todos los mercados
-                mercados_a_buscar = mercados
-            
-            # Buscar en los mercados determinados hasta encontrar datos
-            for mercado in mercados_a_buscar:
-                try:
-                    # Intentar con datos ajustados primero
-                    serie_historica = obtener_serie_historica_directa(
-                        simbolo, mercado, fecha_desde_str, fecha_hasta_str, 'ajustada', token_portador
-                    )
+            # Usar el mismo método que funciona en las métricas del portafolio
+            try:
+                # Usar obtener_serie_historica_activo que funciona correctamente
+                serie = obtener_serie_historica_activo(simbolo, token_portador, fecha_desde_str, fecha_hasta_str)
+                
+                if serie is not None and not serie.empty and len(serie) > 10 and serie.nunique() > 1:
+                    series_data[simbolo] = serie
+                    simbolos_exitosos.append(simbolo)
+                    serie_encontrada = True
+                    mercado_encontrado = "detectado_automáticamente"
                     
-                    if serie_historica and len(serie_historica) > 0:
-                        # Procesar los datos
-                        precios = []
-                        fechas = []
+                    # Mostrar información del símbolo exitoso
+                    if len(simbolos_exitosos) <= 10:
+                        st.success(f"✅ {simbolo} (auto-detectado): {len(serie)} puntos de datos")
                         
-                        for item in serie_historica:
-                            try:
-                                precio = item.get('ultimoPrecio')
-                                if not precio or precio == 0:
-                                    precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
-                                
-                                fecha_str = item.get('fechaHora') or item.get('fecha')
-                                
-                                if precio is not None and precio > 0 and fecha_str:
-                                    fecha_parsed = parse_datetime_flexible(fecha_str)
-                                    if fecha_parsed is not None:
-                                        precios.append(precio)
-                                        fechas.append(fecha_parsed)
-                                        
-                            except Exception as e:
-                                continue
+            except Exception as e:
+                # Si falla, intentar con el método directo como fallback
+                mercados_a_buscar = []
+                if simbolo in simbolo_mercado_map:
+                    # Usar el mercado más probable primero
+                    mercado_principal = simbolo_mercado_map[simbolo]
+                    mercados_a_buscar = [mercado_principal] + [m for m in mercados if m != mercado_principal]
+                else:
+                    # Si no está en el mapeo, buscar en todos los mercados
+                    mercados_a_buscar = mercados
+                
+                # Buscar en los mercados determinados hasta encontrar datos
+                for mercado in mercados_a_buscar:
+                    try:
+                        # Intentar con datos ajustados primero
+                        serie_historica = obtener_serie_historica_directa(
+                            simbolo, mercado, fecha_desde_str, fecha_hasta_str, 'ajustada', token_portador
+                        )
                         
-                        if len(precios) > 10:  # Mínimo de datos válidos
-                            # Crear serie de pandas
-                            serie = pd.Series(precios, index=fechas, name=simbolo)
-                            serie = serie.sort_index()
+                        if serie_historica and len(serie_historica) > 0:
+                            # Procesar los datos
+                            precios = []
+                            fechas = []
                             
-                            # Verificar que la serie tenga variación
-                            if serie.nunique() > 1:
-                                series_data[simbolo] = serie
-                                simbolos_exitosos.append(simbolo)
-                                serie_encontrada = True
-                                mercado_encontrado = mercado
+                            for item in serie_historica:
+                                try:
+                                    precio = item.get('ultimoPrecio')
+                                    if not precio or precio == 0:
+                                        precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
+                                    
+                                    fecha_str = item.get('fechaHora') or item.get('fecha')
+                                    
+                                    if precio is not None and precio > 0 and fecha_str:
+                                        fecha_parsed = parse_datetime_flexible(fecha_str)
+                                        if fecha_parsed is not None:
+                                            precios.append(precio)
+                                            fechas.append(fecha_parsed)
+                                            
+                                except Exception as e:
+                                    continue
+                            
+                            if len(precios) > 10:  # Mínimo de datos válidos
+                                # Crear serie de pandas
+                                serie = pd.Series(precios, index=fechas, name=simbolo)
+                                serie = serie.sort_index()
                                 
-                                # Mostrar información del símbolo exitoso
-                                if len(simbolos_exitosos) <= 10:
-                                    st.success(f"✅ {simbolo} ({mercado}): {len(serie)} puntos de datos")
-                                break
-                        
-                except Exception as e:
-                    continue
+                                # Verificar que la serie tenga variación
+                                if serie.nunique() > 1:
+                                    series_data[simbolo] = serie
+                                    simbolos_exitosos.append(simbolo)
+                                    serie_encontrada = True
+                                    mercado_encontrado = mercado
+                                    
+                                    # Mostrar información del símbolo exitoso
+                                    if len(simbolos_exitosos) <= 10:
+                                        st.success(f"✅ {simbolo} ({mercado}): {len(serie)} puntos de datos")
+                                    break
+                            
+                    except Exception as e:
+                        continue
             
             # Si no se encontró en ningún mercado, marcar como fallido
             if not serie_encontrada:
