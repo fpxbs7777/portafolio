@@ -8048,12 +8048,13 @@ def calcular_frontera_interactiva(manager_inst, calcular_todos=True, incluir_act
         st.error(f"❌ Error en frontera eficiente interactiva: {str(e)}")
         return None
 
-def obtener_movimientos_reales(access_token, fecha_desde=None, fecha_hasta=None):
+def obtener_movimientos_reales(access_token, id_cliente=None, fecha_desde=None, fecha_hasta=None):
     """
     Obtiene los movimientos/operaciones de la cuenta usando la API de InvertirOnline
     
     Args:
         access_token (str): Token de acceso para la autenticación
+        id_cliente (str): ID del cliente para filtrar operaciones (opcional)
         fecha_desde (str): Fecha desde en formato YYYY-MM-DD (opcional)
         fecha_hasta (str): Fecha hasta en formato YYYY-MM-DD (opcional)
     
@@ -8075,6 +8076,8 @@ def obtener_movimientos_reales(access_token, fecha_desde=None, fecha_hasta=None)
         params['filtro.fechaDesde'] = fecha_desde
     if fecha_hasta:
         params['filtro.fechaHasta'] = fecha_hasta
+    if id_cliente:
+        params['filtro.cuentaComitente'] = id_cliente
     
     try:
         st.info(f"🔗 Consultando operaciones desde {fecha_desde or 'inicio'} hasta {fecha_hasta or 'actual'}")
@@ -8844,6 +8847,171 @@ def mostrar_metricas_por_periodo(timeline):
     
     st.plotly_chart(fig_metricas, use_container_width=True)
 
+def unificar_composicion_portafolio(portafolio_actual, operaciones, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Unifica la composición actual del portafolio con la recreación basada en operaciones reales
+    
+    Args:
+        portafolio_actual (dict): Composición actual del portafolio
+        operaciones (list): Lista de operaciones reales
+        token_acceso (str): Token de acceso
+        fecha_desde (str): Fecha desde
+        fecha_hasta (str): Fecha hasta
+    
+    Returns:
+        dict: Composición unificada con evolución temporal
+    """
+    # Obtener símbolos únicos de operaciones y portafolio actual
+    simbolos_operaciones = list(set([op.get('simbolo') for op in operaciones if op.get('simbolo')]))
+    simbolos_actuales = list(portafolio_actual.keys()) if portafolio_actual else []
+    simbolos_totales = list(set(simbolos_operaciones + simbolos_actuales))
+    
+    composicion_unificada = {}
+    
+    for simbolo in simbolos_totales:
+        # Obtener datos históricos del símbolo
+        datos_historicos = obtener_serie_historica_iol(token_acceso, simbolo, fecha_desde, fecha_hasta)
+        
+        if datos_historicos:
+            # Reconstruir posición basada en operaciones
+            posicion_operaciones = 0
+            fechas_operaciones = []
+            
+            for op in operaciones:
+                if op.get('simbolo') == simbolo and op.get('estado') == 'terminada':
+                    fecha_op = pd.to_datetime(op.get('fechaOperada', op.get('fechaOrden')))
+                    cantidad = op.get('cantidadOperada', op.get('cantidad', 0))
+                    
+                    if op.get('tipo') == 'Compra':
+                        posicion_operaciones += cantidad
+                    elif op.get('tipo') == 'Venta':
+                        posicion_operaciones -= cantidad
+                    
+                    fechas_operaciones.append(fecha_op)
+            
+            # Obtener posición actual del portafolio
+            posicion_actual = 0
+            if simbolo in portafolio_actual:
+                posicion_actual = portafolio_actual[simbolo].get('cantidad', 0)
+            
+            # Crear serie temporal de composición
+            fechas_unicas = sorted(set(fechas_operaciones + [pd.to_datetime(fecha_desde), pd.to_datetime(fecha_hasta)]))
+            composicion_por_fecha = {}
+            precios_por_fecha = {}
+            
+            for fecha in fechas_unicas:
+                # Buscar precio más cercano en datos históricos
+                fecha_str = fecha.strftime('%Y-%m-%d')
+                precio = datos_historicos.get(fecha_str, {}).get('cierre', 0)
+                precios_por_fecha[fecha_str] = precio
+                
+                # Calcular posición acumulada hasta esa fecha
+                posicion_acumulada = 0
+                for op in operaciones:
+                    if op.get('simbolo') == simbolo and op.get('estado') == 'terminada':
+                        fecha_op = pd.to_datetime(op.get('fechaOperada', op.get('fechaOrden')))
+                        if fecha_op <= fecha:
+                            cantidad = op.get('cantidadOperada', op.get('cantidad', 0))
+                            if op.get('tipo') == 'Compra':
+                                posicion_acumulada += cantidad
+                            elif op.get('tipo') == 'Venta':
+                                posicion_acumulada -= cantidad
+                
+                composicion_por_fecha[fecha_str] = posicion_acumulada
+            
+            composicion_unificada[simbolo] = {
+                'posicion_actual': posicion_actual,
+                'posicion_operaciones': posicion_operaciones,
+                'composicion_por_fecha': composicion_por_fecha,
+                'precios_por_fecha': precios_por_fecha,
+                'datos_historicos': datos_historicos
+            }
+    
+    return composicion_unificada
+
+def crear_grafico_evolucion_portafolio(composicion_unificada):
+    """
+    Crea un gráfico de serie temporal mostrando la evolución del valor del portafolio
+    
+    Args:
+        composicion_unificada (dict): Composición unificada del portafolio
+    
+    Returns:
+        plotly.graph_objects.Figure: Gráfico de evolución
+    """
+    fig = go.Figure()
+    
+    # Calcular valor total del portafolio por fecha
+    fechas_totales = set()
+    for simbolo, datos in composicion_unificada.items():
+        fechas_totales.update(datos['composicion_por_fecha'].keys())
+    
+    fechas_ordenadas = sorted(fechas_totales)
+    valor_total_por_fecha = {}
+    
+    for fecha in fechas_ordenadas:
+        valor_total = 0
+        for simbolo, datos in composicion_unificada.items():
+            cantidad = datos['composicion_por_fecha'].get(fecha, 0)
+            precio = datos['precios_por_fecha'].get(fecha, 0)
+            valor_total += cantidad * precio
+        valor_total_por_fecha[fecha] = valor_total
+    
+    # Gráfico principal: Valor total del portafolio
+    fig.add_trace(go.Scatter(
+        x=fechas_ordenadas,
+        y=list(valor_total_por_fecha.values()),
+        mode='lines+markers',
+        name='Valor Total del Portafolio',
+        line=dict(color='#1f77b4', width=3),
+        marker=dict(size=6)
+    ))
+    
+    # Gráficos individuales por activo (en colores más suaves)
+    colores = ['#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+    
+    for i, (simbolo, datos) in enumerate(composicion_unificada.items()):
+        fechas_activo = sorted(datos['composicion_por_fecha'].keys())
+        valores_activo = []
+        
+        for fecha in fechas_activo:
+            cantidad = datos['composicion_por_fecha'][fecha]
+            precio = datos['precios_por_fecha'].get(fecha, 0)
+            valores_activo.append(cantidad * precio)
+        
+        if any(v > 0 for v in valores_activo):  # Solo mostrar si tiene valor
+            fig.add_trace(go.Scatter(
+                x=fechas_activo,
+                y=valores_activo,
+                mode='lines',
+                name=f'{simbolo}',
+                line=dict(color=colores[i % len(colores)], width=1, dash='dot'),
+                opacity=0.7
+            ))
+    
+    fig.update_layout(
+        title={
+            'text': '📈 Evolución del Valor del Portafolio - Composición Unificada',
+            'x': 0.5,
+            'xanchor': 'center',
+            'font': {'size': 16}
+        },
+        xaxis_title='Fecha',
+        yaxis_title='Valor del Portafolio (AR$)',
+        hovermode='x unified',
+        template='plotly_white',
+        legend=dict(
+            orientation="v",
+            yanchor="top",
+            y=1,
+            xanchor="left",
+            x=1.02
+        ),
+        height=600
+    )
+    
+    return fig
+
 def mostrar_operaciones_reales():
     """
     Muestra el análisis de operaciones reales del portafolio
@@ -8874,221 +9042,140 @@ def mostrar_operaciones_reales():
         )
     
     # Botón para ejecutar análisis
-    if st.button("🔍 Analizar Operaciones", type="primary"):
-        with st.spinner("Obteniendo operaciones..."):
+    if st.button("🔍 Analizar Operaciones y Composición", type="primary"):
+        with st.spinner("Obteniendo operaciones y unificando composición..."):
+            # Obtener ID del cliente seleccionado
+            id_cliente = st.session_state.get('cliente_seleccionado', {}).get('id')
             operaciones = obtener_movimientos_reales(
                 token_acceso, 
-                fecha_desde.isoformat(), 
-                fecha_hasta.isoformat()
+                id_cliente=id_cliente,
+                fecha_desde=fecha_desde.isoformat(), 
+                fecha_hasta=fecha_hasta.isoformat()
             )
         
         if operaciones:
             st.success(f"✅ Se obtuvieron {len(operaciones)} operaciones")
             
-            # Mostrar resumen de operaciones
-            st.subheader("📊 Resumen de Operaciones")
+            # Obtener portafolios actuales
+            portafolio_ar = st.session_state.get('portafolio_ar', {})
+            portafolio_eeuu = st.session_state.get('portafolio_eeuu', {})
+            portafolio_combinado = {**portafolio_ar, **portafolio_eeuu}
             
-            df_ops = pd.DataFrame(operaciones)
-            df_ops['fechaOrden'] = pd.to_datetime(df_ops['fechaOrden'], format='mixed')
-            
-            # Métricas principales
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Total Operaciones", len(operaciones))
-            with col2:
-                compras = len([op for op in operaciones if op['tipo'] == 'Compra'])
-                st.metric("Compras", compras)
-            with col3:
-                ventas = len([op for op in operaciones if op['tipo'] == 'Venta'])
-                st.metric("Ventas", ventas)
-            with col4:
-                simbolos_unicos = df_ops['simbolo'].nunique()
-                st.metric("Símbolos", simbolos_unicos)
-            
-            # Tabla de operaciones
-            st.subheader("📋 Detalle de Operaciones")
-            
-            # Filtrar columnas relevantes para mostrar
-            columnas_mostrar = ['fechaOrden', 'simbolo', 'tipo', 'cantidadOperada', 'precioOperado', 'montoOperado']
-            columnas_disponibles = [col for col in columnas_mostrar if col in df_ops.columns]
-            
-            if columnas_disponibles:
-                df_mostrar = df_ops[columnas_disponibles].copy()
-                df_mostrar['fechaOrden'] = df_mostrar['fechaOrden'].dt.strftime('%Y-%m-%d %H:%M')
-                
-                # Renombrar columnas para mejor visualización
-                df_mostrar = df_mostrar.rename(columns={
-                    'fechaOrden': 'Fecha',
-                    'simbolo': 'Símbolo',
-                    'tipo': 'Tipo',
-                    'cantidadOperada': 'Cantidad',
-                    'precioOperado': 'Precio',
-                    'montoOperado': 'Monto'
-                })
-                
-                st.dataframe(df_mostrar, use_container_width=True, height=400)
-            
-            # Análisis del portafolio histórico
-            st.subheader("📈 Análisis del Portafolio Histórico")
-            
-            with st.spinner("Calculando valor del portafolio histórico..."):
-                resultado = calcular_valor_portafolio_historico_streamlit(
-                    operaciones, 
-                    fecha_desde.isoformat(), 
+            # Unificar composición actual con operaciones reales
+            with st.spinner("Unificando composición del portafolio..."):
+                composicion_unificada = unificar_composicion_portafolio(
+                    portafolio_combinado,
+                    operaciones,
+                    token_acceso,
+                    fecha_desde.isoformat(),
                     fecha_hasta.isoformat()
                 )
             
-            if resultado:
-                df_portafolio, posiciones, df_flujo = resultado
+            if composicion_unificada:
+                # Mostrar gráfico de evolución
+                st.subheader("📊 Evolución del Valor del Portafolio")
                 
-                # Gráfico de evolución del portafolio
-                st.subheader("💰 Evolución del Valor del Portafolio")
+                fig_evolucion = crear_grafico_evolucion_portafolio(composicion_unificada)
+                st.plotly_chart(fig_evolucion, use_container_width=True)
                 
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=df_portafolio['fecha'],
-                    y=df_portafolio['valor'],
-                    mode='lines',
-                    name='Valor del Portafolio',
-                    line=dict(color='#2E86AB', width=3)
-                ))
+                # Mostrar resumen de operaciones
+                st.subheader("📊 Resumen de Operaciones")
                 
-                # Marcar operaciones en el gráfico
-                for _, op in df_ops.iterrows():
-                    color = 'green' if op['tipo'] == 'Compra' else 'red'
-                    symbol = 'triangle-up' if op['tipo'] == 'Compra' else 'triangle-down'
-                    fig.add_trace(go.Scatter(
-                        x=[op['fechaOrden']],
-                        y=[op['montoOperado']],
-                        mode='markers',
-                        name=f"{op['tipo']} {op['simbolo']}",
-                        marker=dict(color=color, size=10, symbol=symbol),
-                        showlegend=False,
-                        hovertemplate=f"<b>{op['tipo']} {op['simbolo']}</b><br>" +
-                                    f"Cantidad: {op['cantidadOperada']}<br>" +
-                                    f"Precio: ${op['precioOperado']:.2f}<br>" +
-                                    f"Monto: ${op['montoOperado']:,.2f}<br>" +
-                                    "<extra></extra>"
-                    ))
+                df_ops = pd.DataFrame(operaciones)
+                df_ops['fechaOrden'] = pd.to_datetime(df_ops['fechaOrden'], format='mixed')
                 
-                fig.update_layout(
-                    title='Evolución del Valor del Portafolio',
-                    xaxis_title='Fecha',
-                    yaxis_title='Valor ($)',
-                    template='plotly_white',
-                    height=500
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # Gráfico de flujo de efectivo
-                if df_flujo is not None and not df_flujo.empty:
-                    st.subheader("💸 Flujo de Efectivo Acumulado")
-                    
-                    fig_flujo = go.Figure()
-                    fig_flujo.add_trace(go.Scatter(
-                        x=df_flujo['fecha'],
-                        y=df_flujo['valor_acumulado'],
-                        mode='lines',
-                        name='Flujo de Efectivo Neto',
-                        line=dict(color='#E74C3C', width=3)
-                    ))
-                    
-                    fig_flujo.update_layout(
-                        title='Flujo de Efectivo Acumulado',
-                        xaxis_title='Fecha',
-                        yaxis_title='Flujo Acumulado ($)',
-                        template='plotly_white',
-                        height=400
-                    )
-                    
-                    st.plotly_chart(fig_flujo, use_container_width=True)
-                
-                # Composición actual del portafolio
-                st.subheader("🎯 Composición Actual del Portafolio")
-                
-                posiciones_activas = {k: v for k, v in posiciones.items() if v > 0}
-                
-                if posiciones_activas:
-                    # Crear gráfico de torta
-                    simbolos = list(posiciones_activas.keys())
-                    cantidades = list(posiciones_activas.values())
-                    
-                    # Obtener precios actuales para calcular valores
-                    valores_actuales = []
-                    for simbolo in simbolos:
-                        precio_actual = df_ops[df_ops['simbolo'] == simbolo]['precioOperado'].iloc[-1]
-                        valor = posiciones_activas[simbolo] * precio_actual
-                        valores_actuales.append(valor)
-                    
-                    fig_pie = go.Figure(data=[go.Pie(
-                        labels=simbolos,
-                        values=valores_actuales,
-                        hole=0.3
-                    )])
-                    
-                    fig_pie.update_layout(
-                        title='Composición Actual del Portafolio',
-                        height=500
-                    )
-                    
-                    st.plotly_chart(fig_pie, use_container_width=True)
-                    
-                    # Tabla de posiciones
-                    st.subheader("📊 Detalle de Posiciones")
-                    
-                    posiciones_data = []
-                    for simbolo, cantidad in posiciones_activas.items():
-                        precio_actual = df_ops[df_ops['simbolo'] == simbolo]['precioOperado'].iloc[-1]
-                        valor_posicion = cantidad * precio_actual
-                        posiciones_data.append({
-                            'Símbolo': simbolo,
-                            'Cantidad': cantidad,
-                            'Precio Actual': f"${precio_actual:.2f}",
-                            'Valor': f"${valor_posicion:,.2f}"
-                        })
-                    
-                    df_posiciones = pd.DataFrame(posiciones_data)
-                    st.dataframe(df_posiciones, use_container_width=True)
-                else:
-                    st.info("No hay posiciones activas en el portafolio")
-                
-                # Estadísticas finales
-                st.subheader("📈 Estadísticas del Período")
-                
-                valor_actual = df_portafolio['valor'].iloc[-1]
-                valor_inicial = df_portafolio['valor'].iloc[0]
-                rendimiento_total = ((valor_actual - valor_inicial) / valor_inicial * 100) if valor_inicial > 0 else 0
-                
-                col1, col2, col3 = st.columns(3)
+                # Métricas principales
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    st.metric("Valor Inicial", f"${valor_inicial:,.2f}")
+                    st.metric("Total Operaciones", len(operaciones))
                 with col2:
-                    st.metric("Valor Actual", f"${valor_actual:,.2f}")
+                    compras = len([op for op in operaciones if op['tipo'] == 'Compra'])
+                    st.metric("Compras", compras)
                 with col3:
-                    st.metric("Rendimiento Total", f"{rendimiento_total:+.2f}%")
+                    ventas = len([op for op in operaciones if op['tipo'] == 'Venta'])
+                    st.metric("Ventas", ventas)
+                with col4:
+                    simbolos_unicos = df_ops['simbolo'].nunique()
+                    st.metric("Símbolos", simbolos_unicos)
                 
-                # Resumen por símbolo
-                st.subheader("📋 Resumen por Símbolo")
+                # Comparación: Composición Actual vs Recreada por Operaciones
+                st.subheader("🔄 Comparación: Composición Actual vs Recreada")
                 
-                resumen_data = []
-                for simbolo in df_ops['simbolo'].unique():
-                    ops_simbolo = df_ops[df_ops['simbolo'] == simbolo]
-                    compras_simbolo = len(ops_simbolo[ops_simbolo['tipo'] == 'Compra'])
-                    ventas_simbolo = len(ops_simbolo[ops_simbolo['tipo'] == 'Venta'])
-                    monto_total = ops_simbolo['montoOperado'].sum()
-                    posicion_actual = posiciones.get(simbolo, 0)
+                comparacion_data = []
+                for simbolo, datos in composicion_unificada.items():
+                    posicion_actual = datos['posicion_actual']
+                    posicion_operaciones = datos['posicion_operaciones']
+                    diferencia = posicion_actual - posicion_operaciones
                     
-                    resumen_data.append({
+                    comparacion_data.append({
                         'Símbolo': simbolo,
-                        'Compras': compras_simbolo,
-                        'Ventas': ventas_simbolo,
-                        'Monto Total': f"${monto_total:,.2f}",
-                        'Posición Actual': posicion_actual
+                        'Posición Actual': posicion_actual,
+                        'Posición por Operaciones': posicion_operaciones,
+                        'Diferencia': diferencia,
+                        'Estado': '✅ Coincide' if abs(diferencia) < 0.01 else '⚠️ Diferencia'
                     })
                 
-                df_resumen = pd.DataFrame(resumen_data)
-                st.dataframe(df_resumen, use_container_width=True)
+                df_comparacion = pd.DataFrame(comparacion_data)
+                st.dataframe(df_comparacion, use_container_width=True)
+                
+                # Tabla de operaciones detallada
+                st.subheader("📋 Detalle de Operaciones")
+                
+                # Filtrar columnas relevantes para mostrar
+                columnas_mostrar = ['fechaOrden', 'simbolo', 'tipo', 'cantidadOperada', 'precioOperado', 'montoOperado']
+                columnas_disponibles = [col for col in columnas_mostrar if col in df_ops.columns]
+                
+                if columnas_disponibles:
+                    df_mostrar = df_ops[columnas_disponibles].copy()
+                    df_mostrar['fechaOrden'] = df_mostrar['fechaOrden'].dt.strftime('%Y-%m-%d %H:%M')
+                    
+                    # Renombrar columnas para mejor visualización
+                    df_mostrar = df_mostrar.rename(columns={
+                        'fechaOrden': 'Fecha',
+                        'simbolo': 'Símbolo',
+                        'tipo': 'Tipo',
+                        'cantidadOperada': 'Cantidad',
+                        'precioOperado': 'Precio',
+                        'montoOperado': 'Monto'
+                    })
+                    
+                    st.dataframe(df_mostrar, use_container_width=True, height=400)
+                
+                # Estadísticas del período
+                st.subheader("📈 Estadísticas del Período")
+                
+                # Calcular métricas del período
+                fechas_totales = set()
+                for datos in composicion_unificada.values():
+                    fechas_totales.update(datos['composicion_por_fecha'].keys())
+                
+                if fechas_totales:
+                    fechas_ordenadas = sorted(fechas_totales)
+                    
+                    # Calcular valor total por fecha
+                    valores_por_fecha = {}
+                    for fecha in fechas_ordenadas:
+                        valor_total = 0
+                        for datos in composicion_unificada.values():
+                            cantidad = datos['composicion_por_fecha'].get(fecha, 0)
+                            precio = datos['precios_por_fecha'].get(fecha, 0)
+                            valor_total += cantidad * precio
+                        valores_por_fecha[fecha] = valor_total
+                    
+                    valor_inicial = valores_por_fecha.get(fechas_ordenadas[0], 0)
+                    valor_final = valores_por_fecha.get(fechas_ordenadas[-1], 0)
+                    rendimiento_total = ((valor_final - valor_inicial) / valor_inicial * 100) if valor_inicial > 0 else 0
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Valor Inicial", f"AR$ {valor_inicial:,.2f}")
+                    with col2:
+                        st.metric("Valor Final", f"AR$ {valor_final:,.2f}")
+                    with col3:
+                        st.metric("Rendimiento Total", f"{rendimiento_total:+.2f}%")
+                
+            else:
+                st.warning("⚠️ No se pudo unificar la composición del portafolio")
                 
         else:
             st.error("❌ No se pudieron obtener las operaciones")
@@ -9183,8 +9270,10 @@ def mostrar_analisis_portafolio():
                     es_cuenta_eeuu = any([
                         'eeuu' in descripcion.lower(),
                         'estados unidos' in descripcion.lower(),
-                        '-eeuu' in str(numero),
-                        'dolar estadounidense' in moneda.lower()
+                        '-eeuu' in str(numero).lower(),
+                        'dolar estadounidense' in moneda.lower(),
+                        'dolar_estadounidense' in moneda.lower(),
+                        'usd' in moneda.lower()
                     ])
                     
                     pais = "🇺🇸 EEUU" if es_cuenta_eeuu else "🇦🇷 Argentina"
