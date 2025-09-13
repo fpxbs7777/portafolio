@@ -5927,9 +5927,9 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente, portafolio_ar=None, porta
     if portafolio_ar:
         activos_ar = portafolio_ar.get('activos', [])
         for activo in activos_ar:
-        titulo = activo.get('titulo', {})
-        simbolo = titulo.get('simbolo', '')
-        if simbolo:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', '')
+            if simbolo:
                 simbolos.append(f"🇦🇷 {simbolo}")
                 simbolos_info[f"🇦🇷 {simbolo}"] = {
                     'simbolo': simbolo,
