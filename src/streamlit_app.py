@@ -814,22 +814,24 @@ def obtener_estado_cuenta_eeuu(token_portador):
             try:
                 data = respuesta.json()
                 
-                # Filtrar solo las cuentas de EEUU
+                # Filtrar solo las cuentas de EEUU usando la misma lógica que la vista consolidada
                 cuentas_eeuu = []
                 for cuenta in data.get('cuentas', []):
-                    # Identificar cuentas de EEUU por el nombre o número
-                    nombre_cuenta = cuenta.get('descripcion', '').lower()
-                    numero_cuenta = str(cuenta.get('numero', ''))
+                    numero = cuenta.get('numero', 'N/A')
+                    descripcion = cuenta.get('descripcion', 'N/A')
+                    moneda = cuenta.get('moneda', 'N/A')
                     
-                    # Criterios para identificar cuentas de EEUU
-                    if any([
-                        'eeuu' in nombre_cuenta,
-                        'estados unidos' in nombre_cuenta,
-                        'united states' in nombre_cuenta,
-                        'us' in nombre_cuenta,
-                        '-eeuu' in numero_cuenta,
-                        'dolar estadounidense' in cuenta.get('moneda', '').lower()
-                    ]):
+                    # Determinar si es cuenta de EEUU (misma lógica que vista consolidada)
+                    es_cuenta_eeuu = any([
+                        'eeuu' in descripcion.lower(),
+                        'estados unidos' in descripcion.lower(),
+                        '-eeuu' in str(numero).lower(),
+                        'dolar estadounidense' in moneda.lower(),
+                        'dolar_estadounidense' in moneda.lower(),
+                        'usd' in moneda.lower()
+                    ])
+                    
+                    if es_cuenta_eeuu:
                         cuentas_eeuu.append(cuenta)
                 
                 # Crear respuesta filtrada solo para EEUU
@@ -1526,6 +1528,29 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         # Mercados disponibles en orden de prioridad
         mercados = ['bCBA', 'nYSE', 'nASDAQ', 'rOFEX', 'mERVAL']
         
+        # Mapeo de símbolos a mercados más probables
+        simbolo_mercado_map = {
+            # Acciones argentinas - bCBA
+            'GGAL': 'bCBA', 'PAMP': 'bCBA', 'YPF': 'bCBA', 'TEN': 'bCBA', 'CRES': 'bCBA', 
+            'EDN': 'bCBA', 'ALUA': 'bCBA', 'COME': 'bCBA', 'LOMA': 'bCBA', 'MIRG': 'bCBA',
+            'PGR': 'bCBA', 'SUPV': 'bCBA', 'TECO2': 'bCBA', 'TGNO4': 'bCBA', 'TGSU2': 'bCBA',
+            'TRAN': 'bCBA', 'TS': 'bCBA', 'VALO': 'bCBA', 'BMA': 'bCBA', 'CEPU': 'bCBA',
+            'IRCP': 'bCBA', 'PAM': 'bCBA', 'PZE': 'bCBA', 'TGS': 'bCBA',
+            # Bonos argentinos - bCBA
+            'GD30': 'bCBA', 'GD35': 'bCBA', 'GD38': 'bCBA', 'GD41': 'bCBA', 'GD46': 'bCBA',
+            'GD47': 'bCBA', 'GD48': 'bCBA', 'GD49': 'bCBA', 'GD50': 'bCBA', 'GD51': 'bCBA',
+            'GD52': 'bCBA', 'GD53': 'bCBA', 'GD54': 'bCBA', 'GD55': 'bCBA', 'GD56': 'bCBA',
+            'GD57': 'bCBA', 'GD58': 'bCBA', 'GD59': 'bCBA',
+            # ETFs y acciones internacionales - nYSE/nASDAQ
+            'SPY': 'nYSE', 'QQQ': 'nASDAQ', 'IWM': 'nYSE', 'EFA': 'nYSE', 'EEM': 'nYSE',
+            'AGG': 'nYSE', 'TLT': 'nYSE', 'GLD': 'nYSE', 'SLV': 'nYSE', 'USO': 'nYSE',
+            'AAPL': 'nASDAQ', 'MSFT': 'nASDAQ', 'GOOGL': 'nASDAQ', 'AMZN': 'nASDAQ',
+            'TSLA': 'nASDAQ', 'META': 'nASDAQ', 'NVDA': 'nASDAQ', 'NFLX': 'nASDAQ',
+            'AMD': 'nASDAQ', 'INTC': 'nASDAQ', 'ORCL': 'nYSE', 'CRM': 'nYSE',
+            'ADBE': 'nASDAQ', 'PYPL': 'nASDAQ', 'UBER': 'nYSE', 'LYFT': 'nASDAQ',
+            'SNAP': 'nYSE', 'TWTR': 'nYSE'
+        }
+        
         # Crear barra de progreso
         progress_bar = st.progress(0)
         total_simbolos = len(simbolos)
@@ -1539,8 +1564,18 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
             serie_encontrada = False
             mercado_encontrado = None
             
-            # Buscar en cada mercado hasta encontrar datos
-            for mercado in mercados:
+            # Determinar mercados a buscar basado en el mapeo
+            mercados_a_buscar = []
+            if simbolo in simbolo_mercado_map:
+                # Usar el mercado más probable primero
+                mercado_principal = simbolo_mercado_map[simbolo]
+                mercados_a_buscar = [mercado_principal] + [m for m in mercados if m != mercado_principal]
+            else:
+                # Si no está en el mapeo, buscar en todos los mercados
+                mercados_a_buscar = mercados
+            
+            # Buscar en los mercados determinados hasta encontrar datos
+            for mercado in mercados_a_buscar:
                 try:
                     # Intentar con datos ajustados primero
                     serie_historica = obtener_serie_historica_directa(
@@ -1592,7 +1627,8 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
             # Si no se encontró en ningún mercado, marcar como fallido
             if not serie_encontrada:
                 simbolos_fallidos.append(simbolo)
-                detalles_errores[simbolo] = "No encontrado en ningún mercado"
+                mercado_sugerido = simbolo_mercado_map.get(simbolo, "desconocido")
+                detalles_errores[simbolo] = f"No encontrado en ningún mercado (sugerido: {mercado_sugerido})"
         
         # Limpiar barra de progreso
         progress_bar.empty()
@@ -1655,23 +1691,34 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         
         # Intentar diferentes estrategias de alineación
         try:
-            # Estrategia 1: Forward fill y luego backward fill
-            df_precios_filled = df_precios.fillna(method='ffill').fillna(method='bfill')
+            # Estrategia 1: Solo fechas con datos completos (más conservadora)
+            df_precios_completos = df_precios.dropna()
             
-            # Estrategia 2: Interpolar valores faltantes
-            df_precios_interpolated = df_precios.interpolate(method='time')
-            
-            # Usar la estrategia que conserve más datos
-            if not df_precios_filled.dropna().empty:
-                df_precios = df_precios_filled.dropna()
-                st.info("✅ Usando estrategia forward/backward fill")
-            elif not df_precios_interpolated.dropna().empty:
-                df_precios = df_precios_interpolated.dropna()
-                st.info("✅ Usando estrategia de interpolación")
-            else:
-                # Estrategia 3: Solo fechas con datos completos
-                df_precios = df_precios.dropna()
+            if not df_precios_completos.empty and len(df_precios_completos) >= 30:
+                df_precios = df_precios_completos
                 st.info("✅ Usando solo fechas con datos completos")
+            else:
+                # Estrategia 2: Forward fill y luego backward fill
+                df_precios_filled = df_precios.fillna(method='ffill').fillna(method='bfill')
+                
+                if not df_precios_filled.dropna().empty and len(df_precios_filled.dropna()) >= 30:
+                    df_precios = df_precios_filled.dropna()
+                    st.info("✅ Usando estrategia forward/backward fill")
+                else:
+                    # Estrategia 3: Interpolar valores faltantes
+                    df_precios_interpolated = df_precios.interpolate(method='time')
+                    
+                    if not df_precios_interpolated.dropna().empty and len(df_precios_interpolated.dropna()) >= 30:
+                        df_precios = df_precios_interpolated.dropna()
+                        st.info("✅ Usando estrategia de interpolación")
+                    else:
+                        # Estrategia 4: Usar cualquier dato disponible
+                        df_precios = df_precios.dropna()
+                        if df_precios.empty:
+                            st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
+                            return None, None, None
+                        else:
+                            st.warning(f"⚠️ Usando datos limitados: {len(df_precios)} observaciones")
             
             if df_precios.empty:
                 st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
@@ -9514,7 +9561,22 @@ def main():
         background-color: white !important;
     }
     
+    .stSelectbox > div > div > div {
+        color: #262730 !important;
+        background-color: white !important;
+    }
+    
+    .stSelectbox input {
+        color: #262730 !important;
+        background-color: white !important;
+    }
+    
     .stNumberInput > div > div > input {
+        color: #262730 !important;
+        background-color: white !important;
+    }
+    
+    .stNumberInput input {
         color: #262730 !important;
         background-color: white !important;
     }
@@ -9524,7 +9586,17 @@ def main():
         background-color: white !important;
     }
     
+    .stTextInput input {
+        color: #262730 !important;
+        background-color: white !important;
+    }
+    
     .stDateInput > div > div > input {
+        color: #262730 !important;
+        background-color: white !important;
+    }
+    
+    .stDateInput input {
         color: #262730 !important;
         background-color: white !important;
     }
@@ -9533,8 +9605,91 @@ def main():
         color: #262730 !important;
     }
     
+    .stRadio label {
+        color: #262730 !important;
+    }
+    
     .stCheckbox > div {
         color: #262730 !important;
+    }
+    
+    .stCheckbox label {
+        color: #262730 !important;
+    }
+    
+    /* Reglas adicionales para todos los inputs */
+    input[type="text"], input[type="number"], input[type="date"], input[type="email"], input[type="password"] {
+        color: #262730 !important;
+        background-color: white !important;
+    }
+    
+    /* Para elementos de formulario específicos */
+    .stForm input {
+        color: #262730 !important;
+        background-color: white !important;
+    }
+    
+    .stForm select {
+        color: #262730 !important;
+        background-color: white !important;
+    }
+    
+    /* Reglas para elementos de Streamlit específicos */
+    [data-testid="stSelectbox"] input {
+        color: #262730 !important;
+        background-color: white !important;
+    }
+    
+    [data-testid="stNumberInput"] input {
+        color: #262730 !important;
+        background-color: white !important;
+    }
+    
+    [data-testid="stTextInput"] input {
+        color: #262730 !important;
+        background-color: white !important;
+    }
+    
+    [data-testid="stDateInput"] input {
+        color: #262730 !important;
+        background-color: white !important;
+    }
+    
+    /* Reglas específicas para labels y texto de formularios */
+    .stSelectbox label, .stNumberInput label, .stTextInput label, .stDateInput label {
+        color: #262730 !important;
+    }
+    
+    /* Reglas para elementos de formulario dentro de st.form */
+    .stForm .stSelectbox input, .stForm .stNumberInput input, .stForm .stTextInput input {
+        color: #262730 !important;
+        background-color: white !important;
+    }
+    
+    /* Reglas para elementos específicos de optimización */
+    .stSlider label {
+        color: #262730 !important;
+    }
+    
+    .stSlider > div > div {
+        color: #262730 !important;
+    }
+    
+    /* Reglas para elementos de configuración */
+    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4, .stMarkdown h5, .stMarkdown h6 {
+        color: #262730 !important;
+    }
+    
+    /* Reglas para elementos de sidebar */
+    .stSidebar .stSelectbox input, .stSidebar .stNumberInput input, .stSidebar .stTextInput input {
+        color: #262730 !important;
+        background-color: white !important;
+    }
+    
+    /* Reglas para elementos de columnas */
+    .stColumn .stSelectbox input, .stColumn .stNumberInput input, .stColumn .stTextInput input {
+        color: #262730 !important;
+        background-color: white !important;
     }
     
     /* Mejorar visibilidad de métricas */
