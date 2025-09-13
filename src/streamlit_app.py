@@ -4023,13 +4023,13 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
             
             # Nivel de concentración con colores y descripción
             with col3:
-            if metricas['concentracion'] < 0.3:
+                if metricas['concentracion'] < 0.3:
                     nivel = "🟢 Baja"
                     descripcion = "Portafolio bien diversificado"
-            elif metricas['concentracion'] < 0.6:
+                elif metricas['concentracion'] < 0.6:
                     nivel = "🟡 Media"
                     descripcion = "Concentración moderada"
-            else:
+                else:
                     nivel = "🔴 Alta"
                     descripcion = "Alta concentración de riesgo"
                 
