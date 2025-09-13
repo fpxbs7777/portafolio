@@ -95,19 +95,24 @@ def obtener_portafolio_argentina(token_portador):
     try:
         response = requests.get(url, headers=headers, timeout=30)
         if response.status_code == 200:
-            return response.json()
+            portafolio_data = response.json()
+            st.success(f"✅ Portafolio Argentina obtenido: {len(portafolio_data.get('activos', []))} activos")
+            return portafolio_data
+        elif response.status_code == 401:
+            st.error("❌ Token de acceso inválido o expirado para portafolio Argentina")
+            return None
+        elif response.status_code == 403:
+            st.warning("⚠️ No tienes permisos para acceder al portafolio de Argentina")
+            st.info("💡 Esto puede deberse a restricciones de la cuenta o configuración del asesor")
+            return None
         elif response.status_code == 500:
-            st.warning("⚠️ No se pudo obtener el portafolio de Argentina")
+            st.warning("⚠️ Error interno del servidor al obtener portafolio Argentina")
             return None
         else:
-            st.error(f"Error al obtener portafolio Argentina: {response.status_code}")
-            if response.status_code == 401:
-                st.error("Token de acceso inválido o expirado")
-            elif response.status_code == 403:
-                st.error("No tienes permisos para acceder al portafolio de Argentina")
-        return None
+            st.error(f"❌ Error al obtener portafolio Argentina: {response.status_code}")
+            return None
     except Exception as e:
-        st.error(f"Error al obtener portafolio Argentina: {str(e)}")
+        st.error(f"❌ Error de conexión al obtener portafolio Argentina: {str(e)}")
         return None
 
 def obtener_portafolio_eeuu(token_portador):
@@ -118,19 +123,24 @@ def obtener_portafolio_eeuu(token_portador):
     try:
         response = requests.get(url, headers=headers, timeout=30)
         if response.status_code == 200:
-            return response.json()
+            portafolio_data = response.json()
+            st.success(f"✅ Portafolio EEUU obtenido: {len(portafolio_data.get('activos', []))} activos")
+            return portafolio_data
+        elif response.status_code == 401:
+            st.error("❌ Token de acceso inválido o expirado para portafolio EEUU")
+            return None
+        elif response.status_code == 403:
+            st.warning("⚠️ No tienes permisos para acceder al portafolio de Estados Unidos")
+            st.info("💡 Esto puede deberse a restricciones de la cuenta o configuración del asesor")
+            return None
         elif response.status_code == 500:
-            st.warning("⚠️ No se pudo obtener el portafolio de Estados Unidos")
+            st.warning("⚠️ Error interno del servidor al obtener portafolio EEUU")
             return None
         else:
-            st.error(f"Error al obtener portafolio EEUU: {response.status_code}")
-            if response.status_code == 401:
-                st.error("Token de acceso inválido o expirado")
-            elif response.status_code == 403:
-                st.error("No tienes permisos para acceder al portafolio de Estados Unidos")
-        return None
+            st.error(f"❌ Error al obtener portafolio EEUU: {response.status_code}")
+            return None
     except Exception as e:
-        st.error(f"Error al obtener portafolio EEUU: {str(e)}")
+        st.error(f"❌ Error de conexión al obtener portafolio EEUU: {str(e)}")
         return None
 
 def obtener_estado_cuenta(token_portador):
@@ -2500,18 +2510,32 @@ def mostrar_analisis_portafolio():
     ])
 
     with tab1:
+        st.subheader("🇦🇷 Portafolio Argentina")
         if portafolio_ar:
-            st.subheader("🇦🇷 Portafolio Argentina")
             mostrar_resumen_portafolio(portafolio_ar, token_acceso, "ar", id_cliente)
         else:
-            st.warning("No se pudo obtener el portafolio de Argentina")
+            st.error("❌ No se pudo obtener el portafolio de Argentina")
+            st.info("""
+            **Posibles causas:**
+            - Token de acceso inválido o expirado
+            - Permisos insuficientes para acceder al portafolio
+            - Restricciones de la cuenta del asesor
+            - Problemas de conectividad con la API
+            """)
     
     with tab2:
+        st.subheader("🇺🇸 Portafolio Estados Unidos")
         if portafolio_eeuu:
-            st.subheader("🇺🇸 Portafolio Estados Unidos")
             mostrar_resumen_portafolio(portafolio_eeuu, token_acceso, "eeuu", id_cliente)
         else:
-            st.warning("No se pudo obtener el portafolio de EEUU")
+            st.error("❌ No se pudo obtener el portafolio de Estados Unidos")
+            st.info("""
+            **Posibles causas:**
+            - Token de acceso inválido o expirado
+            - Permisos insuficientes para acceder al portafolio
+            - Restricciones de la cuenta del asesor
+            - Problemas de conectividad con la API
+            """)
     
     with tab3:
         st.subheader("💰 Estado de Cuenta")
