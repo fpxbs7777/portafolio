@@ -4267,13 +4267,13 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
             # Mostrar concentración como porcentaje
             concentracion_pct = metricas['concentracion'] * 100
             cols[0].metric("Concentración", 
-                         f"{concentracion_pct:.1f}%",
+                         f"{concentracion_pct:.2f}%",
                          help="Índice de Herfindahl normalizado: 0%=muy diversificado, 100%=muy concentrado")
             
             # Mostrar volatilidad como porcentaje anual
             volatilidad_pct = metricas['std_dev_activo'] * 100
             cols[1].metric("Volatilidad Anual", 
-                         f"{volatilidad_pct:.1f}%",
+                         f"{volatilidad_pct:.2f}%",
                          help="Riesgo medido como desviación estándar de retornos anuales")
             
             # Nivel de concentración con colores
@@ -4290,21 +4290,21 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
             st.subheader("📈 Proyecciones de Rendimiento")
             cols = st.columns(3)
             
-            # Mostrar retornos como porcentaje del portafolio
+            # Mostrar retornos como porcentaje
             retorno_anual_pct = metricas['retorno_esperado_anual'] * 100
             cols[0].metric("Retorno Esperado Anual", 
-                         f"{retorno_anual_pct:+.1f}%",
+                         f"{retorno_anual_pct:+.2f}%",
                          help="Retorno anual esperado basado en datos históricos")
             
-            # Mostrar escenarios como porcentaje del portafolio
+            # Mostrar escenarios como porcentaje
             optimista_pct = (metricas['pl_esperado_max'] / valor_total) * 100 if valor_total > 0 else 0
             pesimista_pct = (metricas['pl_esperado_min'] / valor_total) * 100 if valor_total > 0 else 0
             
             cols[1].metric("Escenario Optimista (95%)", 
-                         f"{optimista_pct:+.1f}%",
+                         f"{optimista_pct:+.2f}%",
                          help="Mejor escenario con 95% de confianza")
             cols[2].metric("Escenario Pesimista (5%)", 
-                         f"{pesimista_pct:+.1f}%",
+                         f"{pesimista_pct:+.2f}%",
                          help="Peor escenario con 5% de confianza")
             
             # Probabilidades
@@ -4444,79 +4444,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
                         })
                         st.dataframe(percentil_df, use_container_width=True)
             
-            with col2:
-                st.markdown("#### 📊 Distribución del Valorizado")
-                
-                # Opciones de visualización
-                tipo_grafico = st.selectbox(
-                    "Tipo de Gráfico:",
-                    ["Histograma", "Box Plot", "Violin Plot", "Density Plot"],
-                    help="Seleccione el tipo de visualización para los valores de activos",
-                    key=f"tipo_grafico_distribuciones_{portfolio_id}"
-                )
-                
-                valores = [a['Valuación'] for a in datos_activos if a['Valuación'] > 0]
-                if valores:
-                    if tipo_grafico == "Histograma":
-                        fig = go.Figure(data=[go.Histogram(
-                            x=valores,
-                            nbinsx=min(20, len(valores)),
-                            marker_color='#0d6efd',
-                            opacity=0.7
-                        )])
-                        fig.update_layout(
-                            title="Distribución del Valorizado de Activos",
-                            xaxis_title="Valorizado ($)",
-                            yaxis_title="Frecuencia",
-                            height=400
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                    elif tipo_grafico == "Box Plot":
-                        fig = go.Figure(data=[go.Box(
-                            y=valores,
-                            name="Valorizado",
-                            marker_color='#0d6efd'
-                        )])
-                        fig.update_layout(
-                            title="Box Plot del Valorizado de Activos",
-                            yaxis_title="Valorizado ($)",
-                            height=400
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                    elif tipo_grafico == "Violin Plot":
-                        fig = go.Figure(data=[go.Violin(
-                            y=valores,
-                            name="Valorizado",
-                            marker_color='#0d6efd'
-                        )])
-                        fig.update_layout(
-                            title="Violin Plot del Valorizado de Activos",
-                            yaxis_title="Valorizado ($)",
-                            height=400
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                    elif tipo_grafico == "Density Plot":
-                        # Crear densidad usando histograma normalizado
-                        hist, bins = np.histogram(valores, bins=min(20, len(valores)), density=True)
-                        bin_centers = (bins[:-1] + bins[1:]) / 2
-                        
-                        fig = go.Figure(data=[go.Scatter(
-                            x=bin_centers,
-                            y=hist,
-                            mode='lines+markers',
-                            name="Densidad Valorizado",
-                            line=dict(color='#0d6efd', width=3)
-                        )])
-                        fig.update_layout(
-                            title="Density Plot del Valorizado de Activos",
-                            xaxis_title="Valorizado ($)",
-                            yaxis_title="Densidad",
-                            height=400
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
             
             # Análisis por tipo de activo
             if 'Tipo' in df_activos.columns and 'Peso (%)' in df_activos.columns:
@@ -4554,7 +4481,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
                 
                 with col1:
                     risk_metrics = {
-                        'Concentración (Herfindahl)': f"{metricas['concentracion']:.4f}",
+                        'Concentración (Herfindahl)': f"{metricas['concentracion']*100:.2f}%",
                         'Volatilidad Anual': f"{metricas['std_dev_activo']*100:.2f}%",
                         'Riesgo Anual': f"{metricas['riesgo_anual']*100:.2f}%",
                         'Retorno Esperado Anual': f"{metricas['retorno_esperado_anual']*100:.2f}%",
