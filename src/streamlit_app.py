@@ -144,8 +144,8 @@ def obtener_estado_cuenta(token_portador):
             return response.json()
         elif response.status_code == 500:
             st.warning("⚠️ No se pudo obtener el estado de cuenta")
-                return None
-            else:
+            return None
+        else:
             st.error(f"Error al obtener estado de cuenta: {response.status_code}")
             if response.status_code == 401:
                 st.error("Token de acceso inválido o expirado")
@@ -154,12 +154,12 @@ def obtener_estado_cuenta(token_portador):
             return None
     except Exception as e:
         st.error(f"Error al obtener estado de cuenta: {str(e)}")
-                return None
+        return None
                 
 def filtrar_estado_cuenta_por_moneda(estado_cuenta, moneda="peso_Argentino"):
     """Filtra el estado de cuenta por moneda"""
     if not estado_cuenta or 'cuentas' not in estado_cuenta:
-            return None
+        return None
             
     cuentas_filtradas = [cuenta for cuenta in estado_cuenta['cuentas'] if cuenta.get('moneda') == moneda]
     
@@ -169,7 +169,7 @@ def filtrar_estado_cuenta_por_moneda(estado_cuenta, moneda="peso_Argentino"):
             'estadisticas': estado_cuenta.get('estadisticas', []),
             'totalEnPesos': estado_cuenta.get('totalEnPesos', 0)
         }
-        return None
+    return None
 
 def obtener_movimientos(token_portador, fecha_desde=None, fecha_hasta=None, pais="argentina"):
     """
@@ -224,7 +224,7 @@ def obtener_notificaciones(token_portador):
         elif response.status_code == 500:
             st.warning("⚠️ No se pudieron obtener las notificaciones")
             return []
-            else:
+        else:
             st.error(f"Error al obtener notificaciones: {response.status_code}")
             return []
     except Exception as e:
@@ -307,8 +307,8 @@ def operar_cpd(token_portador, datos_operacion):
     try:
         response = requests.post(url, headers=headers, json=datos_operacion, timeout=30)
         if response.status_code == 200:
-        return response.json()
-    else:
+            return response.json()
+        else:
             st.error(f"Error al operar CPD: {response.status_code}")
             return None
     except Exception as e:
@@ -327,10 +327,10 @@ def operar_token(token_portador, datos_operacion):
             return response.json()
         else:
             st.error(f"Error al operar token: {response.status_code}")
-                return None
-                except Exception as e:
+            return None
+    except Exception as e:
         st.error(f"Error al operar token: {str(e)}")
-                return None
+        return None
                 
 def vender_activo(token_portador, datos_venta):
     """Realiza una venta de activo"""
@@ -393,9 +393,9 @@ def vender_especie_d(token_portador, datos_venta):
         response = requests.post(url, headers=headers, json=datos_venta, timeout=30)
         if response.status_code == 200:
             return response.json()
-            else:
+        else:
             st.error(f"Error al vender especie D: {response.status_code}")
-        return None
+            return None
     except Exception as e:
         st.error(f"Error al vender especie D: {str(e)}")
         return None
@@ -410,10 +410,10 @@ def comprar_especie_d(token_portador, datos_compra):
         response = requests.post(url, headers=headers, json=datos_compra, timeout=30)
         if response.status_code == 200:
             return response.json()
-            else:
+        else:
             st.error(f"Error al comprar especie D: {response.status_code}")
             return None
-                except Exception as e:
+    except Exception as e:
         st.error(f"Error al comprar especie D: {str(e)}")
         return None
 
@@ -427,10 +427,10 @@ def suscripcion_fci(token_portador, datos_suscripcion):
         response = requests.post(url, headers=headers, json=datos_suscripcion, timeout=30)
         if response.status_code == 200:
             return response.json()
-            else:
+        else:
             st.error(f"Error al suscribir FCI: {response.status_code}")
             return None
-        except Exception as e:
+    except Exception as e:
         st.error(f"Error al suscribir FCI: {str(e)}")
         return None
 
@@ -513,7 +513,7 @@ def obtener_cotizaciones_mep(token_portador):
             return None
     except Exception as e:
         st.error(f"Error al obtener cotizaciones MEP: {str(e)}")
-            return None
+        return None
         
 def comprar_operatoria_simplificada(token_portador, datos_compra):
     """Realiza una compra usando operatoria simplificada"""
@@ -542,10 +542,10 @@ def obtener_test_inversor(token_portador):
         response = requests.get(url, headers=headers, timeout=30)
         if response.status_code == 200:
             return response.json()
-                    else:
+        else:
             st.error(f"Error al obtener test del inversor: {response.status_code}")
             return None
-                    except Exception as e:
+    except Exception as e:
         st.error(f"Error al obtener test del inversor: {str(e)}")
         return None
 
@@ -559,10 +559,10 @@ def enviar_test_inversor(token_portador, datos_test):
         response = requests.post(url, headers=headers, json=datos_test, timeout=30)
         if response.status_code == 200:
             return response.json()
-                    else:
+        else:
             st.error(f"Error al enviar test del inversor: {response.status_code}")
             return None
-                        except Exception as e:
+    except Exception as e:
         st.error(f"Error al enviar test del inversor: {str(e)}")
         return None
 
@@ -1688,12 +1688,12 @@ def calcular_valor_portafolio_historico(token_portador, operaciones, fecha_desde
     # Crear serie temporal del valor del portafolio
     if fecha_desde:
         fecha_inicio = pd.to_datetime(fecha_desde).date()
-                    else:
+    else:
         fecha_inicio = df_ops['fechaOrden'].min().date()
     
     if fecha_hasta:
         fecha_fin = pd.to_datetime(fecha_hasta).date()
-            else:
+    else:
         fecha_fin = datetime.now().date()
     
     fechas = pd.date_range(start=fecha_inicio, end=fecha_fin, freq='D')
@@ -1705,7 +1705,7 @@ def calcular_valor_portafolio_historico(token_portador, operaciones, fecha_desde
             valores_hasta_fecha = df_flujo[df_flujo['fecha'] <= fecha]
             if not valores_hasta_fecha.empty:
                 valor = valores_hasta_fecha['valor_acumulado'].iloc[-1]
-        else:
+            else:
                 valor = 0
         else:
             valor = 0
@@ -1897,13 +1897,13 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
                 concentracion_pct = metricas['concentracion'] * 100
             if metricas['concentracion'] < 0.3:
                 concentracion_status = "🟢 Baja"
-                    concentracion_color = "green"
+                concentracion_color = "green"
             elif metricas['concentracion'] < 0.6:
                 concentracion_status = "🟡 Media"
-                    concentracion_color = "orange"
+                concentracion_color = "orange"
             else:
                 concentracion_status = "🔴 Alta"
-                    concentracion_color = "red"
+                concentracion_color = "red"
                 
                 col_riesgo1.metric(
                     "Concentración", 
@@ -2410,7 +2410,7 @@ def mostrar_estado_cuenta(estado_cuenta, es_eeuu=False):
     """
     if es_eeuu:
         st.markdown("### 🇺🇸 Estado de Cuenta EEUU")
-        else:
+    else:
         st.markdown("### 💰 Estado de Cuenta")
     
     if not estado_cuenta:
@@ -2529,7 +2529,7 @@ def main():
     
     # Configurar cache para mejor rendimiento
     if hasattr(st, 'cache_data'):
-    st.cache_data.clear()
+        st.cache_data.clear()
     
     # Header principal con gradiente
     st.markdown("""
@@ -2563,17 +2563,17 @@ def main():
         contraseña = st.text_input("Contraseña", type="password", help="Tu contraseña de IOL")
         
         if st.button("🔑 Iniciar Sesión", type="primary"):
-                    if usuario and contraseña:
+            if usuario and contraseña:
                 with st.spinner("🔄 Autenticando..."):
                     token_acceso = autenticar_usuario(usuario, contraseña)
-                            if token_acceso:
-                                st.session_state.token_acceso = token_acceso
+                    if token_acceso:
+                        st.session_state.token_acceso = token_acceso
                         st.session_state.usuario_autenticado = True
                         st.success("✅ Autenticación exitosa!")
-                                st.rerun()
-                            else:
-                                st.error("❌ Error en la autenticación")
+                        st.rerun()
                     else:
+                        st.error("❌ Error en la autenticación")
+            else:
                 st.warning("⚠️ Por favor, ingresa usuario y contraseña")
         
         # Mostrar estado de conexión
@@ -2582,10 +2582,10 @@ def main():
             
             # Botón para cerrar sesión
             if st.button("🚪 Cerrar Sesión"):
-                    st.session_state.token_acceso = None
+                st.session_state.token_acceso = None
                 st.session_state.usuario_autenticado = False
-                    st.session_state.cliente_seleccionado = None
-                    st.rerun()
+                st.session_state.cliente_seleccionado = None
+                st.rerun()
             
             # Configuración de fechas
             st.markdown("""
