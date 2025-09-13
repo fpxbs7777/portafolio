@@ -1041,10 +1041,10 @@ async def obtener_historico_mep_async(token_acceso, fecha_desde, fecha_hasta):
                 precios = serie.values.tolist()
                 fechas = serie.index.tolist()
                 
-                datos_series[simbolo] = {
-                    'precios': precios,
-                    'fechas': fechas
-                }
+                    datos_series[simbolo] = {
+                        'precios': precios,
+                        'fechas': fechas
+                    }
         
         # Verificar que tenemos datos para ambos tickers
         if 'AL30' not in datos_series or 'AL30D' not in datos_series:
@@ -2441,7 +2441,7 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                     return None, None, None
             except Exception as e2:
                 st.error(f"❌ Error crítico en alineamiento de datos: {str(e2)}")
-                return None, None, None
+            return None, None, None
         
         # Calcular retornos logarítmicos
         try:
@@ -2449,7 +2449,7 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
             
             if retornos.empty:
                 st.error("❌ No se pudieron calcular retornos válidos")
-                return None, None, None
+            return None, None, None
         
             st.success(f"✅ Datos alineados: {len(retornos)} fechas, {len(retornos.columns)} activos")
         
@@ -2602,7 +2602,7 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
             return None
             
         try:
-            data = response.json()
+        data = response.json()
         except ValueError as e:
             print(f"Error al parsear respuesta JSON para FCI {simbolo}: {e}")
             return None
@@ -9662,7 +9662,10 @@ def calcular_evolucion_portafolio_unificada(token_acceso, id_cliente, fecha_desd
         # Obtener portafolio actual
         portafolio_actual = obtener_portafolio(token_acceso, id_cliente)
         if not portafolio_actual:
+            st.warning("⚠️ No se pudo obtener el portafolio actual")
             return None
+        
+        st.info(f"📊 Portafolio actual obtenido: {len(portafolio_actual.get('activos', []))} activos")
         
         # Procesar operaciones y crear timeline
         df_ops = pd.DataFrame(operaciones)
@@ -9744,45 +9747,46 @@ def crear_timeline_composicion(df_ops, portafolio_actual):
                     })
             
             # Calcular valor del portafolio en esta fecha
+            # Para el análisis histórico, usamos el flujo de efectivo acumulado
             valor_total = 0
             composicion = {}
             
+            # Calcular flujo de efectivo acumulativo hasta esta fecha
+            flujo_acumulado = 0
+            if timeline:
+                # Comenzar con el flujo anterior
+                flujo_acumulado = timeline[-1]['valor_total']
+            
+            # Agregar el flujo de esta fecha
+            for _, op in ops_fecha.iterrows():
+                if op['tipo'] == 'Compra':
+                    # Calcular monto usando precio y cantidad
+                    monto = op['cantidadOperada'] * op['precioOperado']
+                    flujo_acumulado -= monto  # Salida de efectivo
+                elif op['tipo'] == 'Venta':
+                    # Calcular monto usando precio y cantidad
+                    monto = op['cantidadOperada'] * op['precioOperado']
+                    flujo_acumulado += monto  # Entrada de efectivo
+            
+            valor_total = flujo_acumulado
+            
+            # Crear composición básica basada en posiciones actuales
             for simbolo, pos in posiciones_actuales.items():
                 if pos['cantidad'] > 0:  # Solo posiciones activas
-                    # Obtener precio actual del portafolio actual
-                    precio_actual = obtener_precio_actual_simbolo(portafolio_actual, simbolo)
-                    
-                    # Si no hay precio actual, usar precio promedio de las operaciones
-                    if not precio_actual or precio_actual <= 0:
-                        if pos['operaciones']:
-                            # Calcular precio promedio ponderado de las operaciones
-                            total_valor = 0
-                            total_cantidad = 0
-                            for op in pos['operaciones']:
-                                if op['tipo'] == 'Compra':
-                                    total_valor += op['cantidad'] * op['precio']
-                                    total_cantidad += op['cantidad']
-                                elif op['tipo'] == 'Venta':
-                                    total_valor -= op['cantidad'] * op['precio']
-                                    total_cantidad -= op['cantidad']
-                            
-                            if total_cantidad > 0:
-                                precio_actual = total_valor / total_cantidad
-                    
-                    if precio_actual and precio_actual > 0:
-                        valor_posicion = pos['cantidad'] * precio_actual
-                        valor_total += valor_posicion
-                        composicion[simbolo] = {
-                            'cantidad': pos['cantidad'],
-                            'precio_actual': precio_actual,
-                            'valor': valor_posicion,
-                            'peso': 0  # Se calculará después
-                        }
+                    composicion[simbolo] = {
+                        'cantidad': pos['cantidad'],
+                        'precio_actual': 0,  # No usamos precios históricos
+                        'valor': 0,  # Valor se calculará proporcionalmente
+                        'peso': 0  # Se calculará después
+                    }
             
-            # Calcular pesos
-            for simbolo in composicion:
-                if valor_total > 0:
-                    composicion[simbolo]['peso'] = composicion[simbolo]['valor'] / valor_total
+            # Calcular pesos (distribuir proporcionalmente por cantidad de activos)
+            num_activos = len(composicion)
+            if num_activos > 0:
+                peso_por_activo = 1.0 / num_activos if valor_total != 0 else 0
+                for simbolo in composicion:
+                    composicion[simbolo]['peso'] = peso_por_activo
+                    composicion[simbolo]['valor'] = valor_total * peso_por_activo if valor_total != 0 else 0
             
             # Debug: Mostrar información para fechas con operaciones
             if len(ops_fecha) > 0:
@@ -9816,15 +9820,22 @@ def obtener_precio_actual_simbolo(portafolio_actual, simbolo):
                 precio = activo.get('precio', activo.get('precioActual', activo.get('ultimoPrecio')))
                 if precio and precio > 0:
                     return precio
+                
                 # Si no hay precio, calcular desde valor y cantidad
                 valor = activo.get('valor', activo.get('valorActual'))
                 cantidad = activo.get('cantidad', activo.get('cantidadNominal'))
                 if valor and cantidad and cantidad > 0:
                     return valor / cantidad
+                
                 # Si aún no hay precio, buscar en campos alternativos
                 precio_compra = activo.get('precioCompra', activo.get('precioPromedio'))
                 if precio_compra and precio_compra > 0:
                     return precio_compra
+                
+                # Buscar en más campos posibles
+                precio_mercado = activo.get('precioMercado', activo.get('precioCotizacion'))
+                if precio_mercado and precio_mercado > 0:
+                    return precio_mercado
         
         # Si no se encuentra en el portafolio actual, retornar None
         return None
@@ -9845,7 +9856,7 @@ def calcular_indice_inteligente(timeline):
         for t in timeline:
             if 'fecha' in t and 'valor_total' in t:
                 datos_timeline.append({
-                    'fecha': t['fecha'],
+                'fecha': t['fecha'],
                     'valor': t.get('valor_total', 0),
                     'num_ops': t.get('num_operaciones', 0)
                 })
@@ -9948,11 +9959,12 @@ def calcular_metricas_reales(timeline, indice_portafolio):
         # Análisis de flujo de efectivo
         flujo_total = 0
         for t in timeline:
-            for op in t['operaciones_dia']:
-                if op['tipo'] == 'Compra':
-                    flujo_total -= op['cantidad'] * op['precio']
-                elif op['tipo'] == 'Venta':
-                    flujo_total += op['cantidad'] * op['precio']
+            if 'operaciones_dia' in t:
+                for op in t['operaciones_dia']:
+                    if op['tipo'] == 'Compra':
+                        flujo_total -= op['cantidad'] * op['precio']
+                    elif op['tipo'] == 'Venta':
+                        flujo_total += op['cantidad'] * op['precio']
         
         return {
             'total_operaciones': total_operaciones,
@@ -10227,7 +10239,7 @@ def crear_graficos_unificados(timeline, indice, operaciones):
                 hovertemplate='<b>Fecha:</b> %{x}<br><b>Índice:</b> %{y:.2f}<br><b>Valor:</b> $%{customdata:,.2f}<extra></extra>',
                 customdata=df_indice['valor']
             ))
-            
+    
             # Agregar operaciones como marcadores si hay operaciones
             if operaciones is not None and len(operaciones) > 0:
                 try:
@@ -10291,7 +10303,7 @@ def crear_grafico_composicion_evolutiva(timeline):
     simbolos = set()
     for t in timeline:
         if 'composicion' in t and t['composicion']:
-            simbolos.update(t['composicion'].keys())
+        simbolos.update(t['composicion'].keys())
     
     simbolos = sorted(list(simbolos))
     
@@ -10311,14 +10323,14 @@ def crear_grafico_composicion_evolutiva(timeline):
         
         # Solo agregar si hay valores positivos
         if any(v > 0 for v in valores):
-            fig_composicion.add_trace(go.Scatter(
-                x=fechas,
-                y=valores,
-                mode='lines',
-                fill='tonexty',
-                name=simbolo,
-                hovertemplate=f'<b>{simbolo}</b><br>Valor: $%{{y:,.2f}}<extra></extra>'
-            ))
+        fig_composicion.add_trace(go.Scatter(
+            x=fechas,
+            y=valores,
+            mode='lines',
+            fill='tonexty',
+            name=simbolo,
+            hovertemplate=f'<b>{simbolo}</b><br>Valor: $%{{y:,.2f}}<extra></extra>'
+        ))
     
     if len(fig_composicion.data) == 0:
         st.warning("⚠️ No hay datos válidos para mostrar en el gráfico de composición")
