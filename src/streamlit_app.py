@@ -733,8 +733,6 @@ def obtener_portafolio_eeuu(token_portador, id_cliente):
     url_portafolio_asesores = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/estados_Unidos'
     encabezados = obtener_encabezado_autorizacion(token_portador)
     
-    st.info(f"🔍 Intentando obtener portafolio EEUU del cliente {id_cliente}")
-    st.info(f"🔑 Token válido: {'Sí' if token_portador else 'No'}")
     
     try:
         # Primer intento: endpoint de Asesores
@@ -742,7 +740,6 @@ def obtener_portafolio_eeuu(token_portador, id_cliente):
         
         if respuesta.status_code == 200:
             data = respuesta.json()
-            st.success(f"✅ Portafolio EEUU obtenido vía Asesores: {len(data.get('activos', []))} activos")
             return data
         elif respuesta.status_code == 404:
             st.info("ℹ️ No se encontró portafolio EEUU vía Asesores, intentando endpoint directo...")
@@ -3971,69 +3968,139 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
         portafolio_dict = {row['Símbolo']: row for row in datos_activos}
         metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
         
-        # Información General
-        cols = st.columns(4)
-        cols[0].metric("Total de Activos", len(datos_activos))
-        cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
-        cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
-        cols[3].metric("Valor Total", f"${valor_total:,.2f}")
+        # Información General - Diseño mejorado
+        st.markdown("### 📊 Resumen Ejecutivo")
+        
+        # Primera fila: Métricas principales
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric(
+                label="💰 Valor Total", 
+                value=f"${valor_total:,.0f}",
+                help="Valor total del portafolio en pesos argentinos"
+            )
+        with col2:
+            st.metric(
+                label="📈 Total Activos", 
+                value=len(datos_activos),
+                help="Número total de posiciones en el portafolio"
+            )
+        with col3:
+            st.metric(
+                label="🎯 Símbolos Únicos", 
+                value=df_activos['Símbolo'].nunique(),
+                help="Número de instrumentos diferentes"
+            )
+        with col4:
+            st.metric(
+                label="📋 Tipos de Activos", 
+                value=df_activos['Tipo'].nunique(),
+                help="Diversificación por tipo de instrumento"
+            )
         
         if metricas:
-            # Métricas de Riesgo
-            st.subheader("⚖️ Análisis de Riesgo")
-            cols = st.columns(3)
+            # Segunda fila: Análisis de Riesgo
+            st.markdown("### ⚖️ Análisis de Riesgo")
+            col1, col2, col3 = st.columns(3)
             
             # Mostrar concentración como porcentaje
             concentracion_pct = metricas['concentracion'] * 100
-            cols[0].metric("Concentración", 
-                         f"{concentracion_pct:.1f}%",
-                         help="Índice de Herfindahl normalizado: 0%=muy diversificado, 100%=muy concentrado")
+            with col1:
+                st.metric(
+                    label="🎯 Concentración", 
+                    value=f"{concentracion_pct:.1f}%",
+                    help="Índice de Herfindahl: 0%=muy diversificado, 100%=muy concentrado"
+                )
             
             # Mostrar volatilidad como porcentaje anual
             volatilidad_pct = metricas['std_dev_activo'] * 100
-            cols[1].metric("Volatilidad Anual", 
-                         f"{volatilidad_pct:.1f}%",
-                         help="Riesgo medido como desviación estándar de retornos anuales")
+            with col2:
+                st.metric(
+                    label="📊 Volatilidad Anual", 
+                    value=f"{volatilidad_pct:.1f}%",
+                    help="Variabilidad esperada de los retornos anuales"
+                )
             
-            # Nivel de concentración con colores
-            if metricas['concentracion'] < 0.3:
-                concentracion_status = "🟢 Baja"
-            elif metricas['concentracion'] < 0.6:
-                concentracion_status = "🟡 Media"
-            else:
-                concentracion_status = "🔴 Alta"
+            # Nivel de concentración con colores y descripción
+            with col3:
+                if metricas['concentracion'] < 0.3:
+                    nivel = "🟢 Baja"
+                    descripcion = "Portafolio bien diversificado"
+                elif metricas['concentracion'] < 0.6:
+                    nivel = "🟡 Media"
+                    descripcion = "Concentración moderada"
+                else:
+                    nivel = "🔴 Alta"
+                    descripcion = "Alta concentración de riesgo"
                 
-            cols[2].metric("Nivel Concentración", concentracion_status)
+                st.metric(
+                    label="📈 Nivel de Riesgo", 
+                    value=nivel,
+                    help=descripcion
+                )
             
-            # Proyecciones
-            st.subheader("📈 Proyecciones de Rendimiento")
-            cols = st.columns(3)
+            # Tercera fila: Proyecciones de Rendimiento
+            st.markdown("### 📈 Proyecciones de Rendimiento")
+            col1, col2, col3 = st.columns(3)
             
             # Mostrar retornos como porcentaje del portafolio
             retorno_anual_pct = metricas['retorno_esperado_anual'] * 100
-            cols[0].metric("Retorno Esperado Anual", 
-                         f"{retorno_anual_pct:+.1f}%",
-                         help="Retorno anual esperado basado en datos históricos")
+            with col1:
+                st.metric(
+                    label="📊 Retorno Esperado", 
+                    value=f"{retorno_anual_pct:+.1f}%",
+                    help="Retorno promedio esperado para el próximo año"
+                )
             
             # Mostrar escenarios como porcentaje del portafolio
             optimista_pct = (metricas['pl_esperado_max'] / valor_total) * 100 if valor_total > 0 else 0
+            with col2:
+                st.metric(
+                    label="🚀 Escenario Optimista", 
+                    value=f"{optimista_pct:+.1f}%",
+                    help="Retorno en el mejor 5% de escenarios (percentil 95)"
+                )
+            
             pesimista_pct = (metricas['pl_esperado_min'] / valor_total) * 100 if valor_total > 0 else 0
+            with col3:
+                st.metric(
+                    label="⚠️ Escenario Pesimista", 
+                    value=f"{pesimista_pct:+.1f}%",
+                    help="Retorno en el peor 5% de escenarios (percentil 5)"
+                )
             
-            cols[1].metric("Escenario Optimista (95%)", 
-                         f"{optimista_pct:+.1f}%",
-                         help="Mejor escenario con 95% de confianza")
-            cols[2].metric("Escenario Pesimista (5%)", 
-                         f"{pesimista_pct:+.1f}%",
-                         help="Peor escenario con 5% de confianza")
-            
-            # Probabilidades
-            st.subheader("🎯 Probabilidades")
-            cols = st.columns(4)
+            # Cuarta fila: Probabilidades
+            st.markdown("### 🎯 Análisis Probabilístico")
+            col1, col2, col3, col4 = st.columns(4)
             probs = metricas['probabilidades']
-            cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
-            cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
-            cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
-            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}%")
+            
+            with col1:
+                st.metric(
+                    label="✅ Prob. Ganancia", 
+                    value=f"{probs['ganancia']*100:.1f}%",
+                    help="Probabilidad de obtener retornos positivos"
+                )
+            
+            with col2:
+                st.metric(
+                    label="❌ Prob. Pérdida", 
+                    value=f"{probs['perdida']*100:.1f}%",
+                    help="Probabilidad de obtener retornos negativos"
+                )
+            
+            with col3:
+                st.metric(
+                    label="🚀 Ganancia >10%", 
+                    value=f"{probs['ganancia_mayor_10']*100:.1f}%",
+                    help="Probabilidad de ganancias superiores al 10%"
+                )
+            
+            with col4:
+                st.metric(
+                    label="⚠️ Pérdida >10%", 
+                    value=f"{probs['perdida_mayor_10']*100:.1f}%",
+                    help="Probabilidad de pérdidas superiores al 10%"
+                )
         
         # Gráficos
         st.subheader("📊 Distribución de Activos")
