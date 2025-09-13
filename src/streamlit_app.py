@@ -1404,7 +1404,7 @@ def mostrar_cotizaciones_mep(token_portador):
                         yaxis_title="Precio ($)",
                         height=400
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, key=f"mep_hist_{simbolo_seleccionado}")
                 else:
                     st.warning("No hay datos históricos disponibles para el período seleccionado")
             else:
@@ -1555,7 +1555,7 @@ def mostrar_cotizaciones_generales(token_portador):
                             yaxis_title="Precio ($)",
                             height=400
                         )
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, use_container_width=True, key=f"cotiz_gen_{simbolo_seleccionado}")
                     else:
                         st.warning("No hay datos históricos disponibles")
                 else:
@@ -1837,7 +1837,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
             margin=dict(l=0, r=0, t=40, b=0)
         )
         fig_fin.update_xaxes(tickangle=45)
-        st.plotly_chart(fig_fin, use_container_width=True)
+        st.plotly_chart(fig_fin, use_container_width=True, key=f"fig_fin_{portfolio_id}")
     
     activos = portafolio.get('activos', [])
     datos_activos = []
@@ -1938,7 +1938,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
                     color_discrete_sequence=['#ff6b6b', '#4ecdc4']
                 )
                 fig_riesgo.update_layout(height=300, showlegend=False)
-                st.plotly_chart(fig_riesgo, use_container_width=True)
+                st.plotly_chart(fig_riesgo, use_container_width=True, key=f"fig_riesgo_{portfolio_id}")
             
             with tab_rendimiento:
                 col_rend1, col_rend2, col_rend3 = st.columns(3)
@@ -1974,7 +1974,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
                     color_discrete_sequence=['#2ecc71', '#3498db', '#e74c3c']
                 )
                 fig_escenarios.update_layout(height=300, showlegend=False)
-                st.plotly_chart(fig_escenarios, use_container_width=True)
+                st.plotly_chart(fig_escenarios, use_container_width=True, key=f"fig_escenarios_{portfolio_id}")
             
             with tab_probabilidades:
                 probs = metricas['probabilidades']
@@ -2005,7 +2005,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
                     color_discrete_sequence=px.colors.qualitative.Set3
                 )
                 fig_probs.update_layout(height=400)
-                st.plotly_chart(fig_probs, use_container_width=True)
+                st.plotly_chart(fig_probs, use_container_width=True, key=f"fig_probs_{portfolio_id}")
         
         # Visualizaciones del Portafolio
         st.markdown("### 📊 Visualizaciones del Portafolio")
@@ -2036,7 +2036,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
                     showlegend=True,
                     legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.01)
                 )
-                st.plotly_chart(fig_pie, use_container_width=True)
+                st.plotly_chart(fig_pie, use_container_width=True, key=f"fig_pie_{portfolio_id}")
                 
                 # Gráfico de barras complementario
                 fig_bars = px.bar(
@@ -2057,7 +2057,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
                     yaxis_title="Valor (AR$)",
                     showlegend=False
                 )
-                st.plotly_chart(fig_bars, use_container_width=True)
+                st.plotly_chart(fig_bars, use_container_width=True, key=f"fig_bars_{portfolio_id}")
             
         with tab_distribucion:
             # Histograma de distribución de valores
@@ -2077,7 +2077,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
                         yaxis_title="Frecuencia",
                         showlegend=False
                     )
-                    st.plotly_chart(fig_hist, use_container_width=True)
+                    st.plotly_chart(fig_hist, use_container_width=True, key=f"fig_hist_{portfolio_id}")
                     
                     # Box plot para análisis estadístico
                     fig_box = px.box(
@@ -2090,7 +2090,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
                         yaxis_title="Valor del Activo (AR$)",
                                 showlegend=False
                             )
-                    st.plotly_chart(fig_box, use_container_width=True)
+                    st.plotly_chart(fig_box, use_container_width=True, key=f"fig_box_{portfolio_id}")
         
         with tab_analisis:
             # Tabla interactiva con Streamlit estándar
