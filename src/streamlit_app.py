@@ -18,6 +18,7 @@ from functools import lru_cache
 import time
 import asyncio
 import aiohttp
+import re
 
 warnings.filterwarnings('ignore')
 
@@ -2173,7 +2174,8 @@ def obtener_serie_historica_directa(simbolo, mercado, fecha_desde, fecha_hasta, 
         'NYSE': 'nYSE', 
         'NASDAQ': 'nASDAQ',
         'ROFEX': 'rOFEX',
-        'Merval': 'bCBA'  # Merval no existe, usar bCBA
+        'Merval': 'bCBA',  # Merval no existe, usar bCBA
+        'Bonos': 'Bonos'   # Mercado de bonos argentinos
     }
     
     mercado_correcto = mercados_mapping.get(mercado, mercado)
@@ -2514,9 +2516,13 @@ def detectar_mercado_simbolo(simbolo, bearer_token):
         return 'nYSE'  # Acciones estadounidenses conocidas
     elif simbolo.endswith('FCI') or simbolo in ['ADCGLOA', 'AE38', 'ETHA']:
         return 'FCI'  # Fondos comunes de inversión
+    elif re.match(r'^S\d+N\d+$', simbolo):  # Patrón para bonos como S10N5, S30S5
+        return 'Bonos'  # Bonos argentinos con formato específico
+    elif simbolo in ['AL30', 'GD30', 'GD35', 'GD38', 'GD41', 'GD46', 'GD47', 'GD48', 'GD49', 'GD50']:
+        return 'Bonos'  # Bonos argentinos conocidos
     else:
         # Intentar detectar consultando la API
-        mercados_test = ['bCBA', 'FCI', 'nYSE', 'nASDAQ']
+        mercados_test = ['bCBA', 'FCI', 'nYSE', 'nASDAQ', 'Bonos']
         for mercado in mercados_test:
             try:
                 url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion"
@@ -5867,38 +5873,15 @@ def mostrar_cotizaciones_mercado(token_acceso):
                         # Gráfico con Plotly usando make_subplots para eje secundario
                         fig = make_subplots(specs=[[{"secondary_y": True}]])
                         
-                        # Línea de MEP calculado
+                        # Línea de MEP calculado (solo esta línea)
                         fig.add_trace(go.Scatter(
                             x=df_historico['fecha'],
                             y=df_historico['mep'],
                             mode='lines',
-                            name='Dólar MEP (AL30/AL30D)',
-                            line=dict(color='#1f77b4', width=2),
-                            hovertemplate='<b>Fecha:</b> %{x}<br><b>MEP:</b> $%{y:,.2f}<br><b>AL30:</b> $%{customdata[0]:,.2f}<br><b>AL30D:</b> $%{customdata[1]:,.2f}<extra></extra>',
-                            customdata=list(zip(df_historico['precio_al30'], df_historico['precio_al30d']))
+                            name='Dólar MEP',
+                            line=dict(color='#1f77b4', width=3),
+                            hovertemplate='<b>Fecha:</b> %{x}<br><b>Dólar MEP:</b> $%{y:,.2f}<extra></extra>'
                         ), secondary_y=False)
-                        
-                        # Línea de AL30 (pesos) para referencia
-                        fig.add_trace(go.Scatter(
-                            x=df_historico['fecha'],
-                            y=df_historico['precio_al30'],
-                            mode='lines',
-                            name='AL30 (Pesos)',
-                            line=dict(color='#ff7f0e', width=1, dash='dash'),
-                            opacity=0.7,
-                            hovertemplate='<b>Fecha:</b> %{x}<br><b>AL30:</b> $%{y:,.2f}<extra></extra>'
-                        ), secondary_y=True)
-                        
-                        # Línea de AL30D (dólares) para referencia
-                        fig.add_trace(go.Scatter(
-                            x=df_historico['fecha'],
-                            y=df_historico['precio_al30d'],
-                            mode='lines',
-                            name='AL30D (Dólares)',
-                            line=dict(color='#2ca02c', width=1, dash='dash'),
-                            opacity=0.7,
-                            hovertemplate='<b>Fecha:</b> %{x}<br><b>AL30D:</b> $%{y:,.2f}<extra></extra>'
-                        ), secondary_y=True)
                         
                         # Configurar layout con eje Y secundario
                         fig.update_layout(
