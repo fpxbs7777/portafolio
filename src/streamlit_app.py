@@ -2490,16 +2490,24 @@ def mostrar_analisis_portafolio():
         col_estado1, col_estado2 = st.columns(2)
         
         with col_estado1:
-            if estado_cuenta_ar:
-                mostrar_estado_cuenta(estado_cuenta_ar, es_eeuu=False)
+            if estado_cuenta:
+                estado_cuenta_ar = filtrar_estado_cuenta_por_moneda(estado_cuenta, "peso_Argentino")
+                if estado_cuenta_ar:
+                    mostrar_estado_cuenta(estado_cuenta_ar, es_eeuu=False)
+                else:
+                    st.warning("No se pudo obtener el estado de cuenta de Argentina")
             else:
-                st.warning("No se pudo obtener el estado de cuenta de Argentina")
+                st.warning("No se pudo obtener el estado de cuenta")
         
         with col_estado2:
-            if estado_cuenta_eeuu:
-                mostrar_estado_cuenta(estado_cuenta_eeuu, es_eeuu=True)
+            if estado_cuenta:
+                estado_cuenta_eeuu = filtrar_estado_cuenta_por_moneda(estado_cuenta, "dolar_Estadounidense")
+                if estado_cuenta_eeuu:
+                    mostrar_estado_cuenta(estado_cuenta_eeuu, es_eeuu=True)
+                else:
+                    st.warning("No se pudo obtener el estado de cuenta de EEUU")
             else:
-                st.warning("No se pudo obtener el estado de cuenta de EEUU")
+                st.warning("No se pudo obtener el estado de cuenta")
     
     with tab4:
         st.subheader("🎯 Optimización y Cobertura")
