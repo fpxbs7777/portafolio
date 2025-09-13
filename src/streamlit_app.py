@@ -9121,6 +9121,8 @@ def obtener_movimientos_reales(access_token, id_cliente=None, fecha_desde=None, 
     
     try:
         st.info(f"🔗 Consultando operaciones desde {fecha_desde or 'inicio'} hasta {fecha_hasta or 'actual'}")
+        st.info(f"🔗 URL: {url}")
+        st.info(f"🔗 Parámetros: {params}")
         
         response = requests.get(url, headers=headers, params=params)
         
@@ -9650,6 +9652,8 @@ def calcular_evolucion_portafolio_unificada(token_acceso, id_cliente, fecha_desd
         dict: Datos unificados del portafolio
     """
     try:
+        st.info(f"🔍 Cliente seleccionado para análisis: ID {id_cliente}")
+        
         # Obtener operaciones reales
         operaciones = obtener_movimientos_reales(token_acceso, id_cliente, fecha_desde, fecha_hasta)
         if not operaciones:
@@ -9747,6 +9751,24 @@ def crear_timeline_composicion(df_ops, portafolio_actual):
                 if pos['cantidad'] > 0:  # Solo posiciones activas
                     # Obtener precio actual del portafolio actual
                     precio_actual = obtener_precio_actual_simbolo(portafolio_actual, simbolo)
+                    
+                    # Si no hay precio actual, usar precio promedio de las operaciones
+                    if not precio_actual or precio_actual <= 0:
+                        if pos['operaciones']:
+                            # Calcular precio promedio ponderado de las operaciones
+                            total_valor = 0
+                            total_cantidad = 0
+                            for op in pos['operaciones']:
+                                if op['tipo'] == 'Compra':
+                                    total_valor += op['cantidad'] * op['precio']
+                                    total_cantidad += op['cantidad']
+                                elif op['tipo'] == 'Venta':
+                                    total_valor -= op['cantidad'] * op['precio']
+                                    total_cantidad -= op['cantidad']
+                            
+                            if total_cantidad > 0:
+                                precio_actual = total_valor / total_cantidad
+                    
                     if precio_actual and precio_actual > 0:
                         valor_posicion = pos['cantidad'] * precio_actual
                         valor_total += valor_posicion
@@ -9799,8 +9821,14 @@ def obtener_precio_actual_simbolo(portafolio_actual, simbolo):
                 cantidad = activo.get('cantidad', activo.get('cantidadNominal'))
                 if valor and cantidad and cantidad > 0:
                     return valor / cantidad
+                # Si aún no hay precio, buscar en campos alternativos
+                precio_compra = activo.get('precioCompra', activo.get('precioPromedio'))
+                if precio_compra and precio_compra > 0:
+                    return precio_compra
+        
+        # Si no se encuentra en el portafolio actual, retornar None
         return None
-    except Exception:
+    except Exception as e:
         return None
 
 def calcular_indice_inteligente(timeline):
@@ -9890,7 +9918,12 @@ def calcular_metricas_reales(timeline, indice_portafolio):
     Calcula métricas reales de retorno y riesgo basadas en operaciones
     """
     try:
-        if not timeline or not indice_portafolio:
+        if not timeline:
+            st.warning("⚠️ Timeline vacío para calcular métricas")
+            return None
+        
+        if not indice_portafolio:
+            st.warning("⚠️ Índice del portafolio vacío para calcular métricas")
             return None
         
         # Análisis de operaciones
@@ -10057,6 +10090,14 @@ def mostrar_analisis_unificado_mejorado(token_acceso, id_cliente):
     """
     st.title("📊 Análisis Unificado del Portafolio")
     st.markdown("### 🔍 Evolución Real, Línea de Tiempo e Índice Inteligente")
+    
+    # Mostrar información del cliente seleccionado
+    cliente_info = st.session_state.cliente_seleccionado
+    if cliente_info:
+        nombre_cliente = cliente_info.get('apellidoYNombre', cliente_info.get('nombre', 'Cliente'))
+        st.info(f"👤 Analizando portafolio de: **{nombre_cliente}** (ID: {id_cliente})")
+    else:
+        st.warning(f"⚠️ Cliente no encontrado en sesión. ID recibido: {id_cliente}")
     
     # Configuración de fechas
     st.subheader("📅 Configuración del Período")
