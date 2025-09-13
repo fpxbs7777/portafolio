@@ -87,69 +87,245 @@ def obtener_clientes(token_portador):
         st.error(f"Error al obtener clientes: {str(e)}")
         return []
 
-def obtener_portafolio(token_portador, cliente_id, mercado="Argentina"):
-    """Obtiene el portafolio del cliente"""
-    url = f'https://api.invertironline.com/api/v2/portafolio/{cliente_id}'
+def obtener_portafolio_argentina(token_portador):
+    """Obtiene el portafolio de Argentina"""
+    url = 'https://api.invertironline.com/api/v2/portafolio/argentina'
     headers = obtener_encabezado_autorizacion(token_portador)
     
     try:
         response = requests.get(url, headers=headers, timeout=30)
         if response.status_code == 200:
             return response.json()
+        elif response.status_code == 500:
+            st.warning("⚠️ No se pudo obtener el portafolio de Argentina")
+            return None
         else:
-            st.error(f"Error al obtener portafolio: {response.status_code}")
+            st.error(f"Error al obtener portafolio Argentina: {response.status_code}")
+            if response.status_code == 401:
+                st.error("Token de acceso inválido o expirado")
+            elif response.status_code == 403:
+                st.error("No tienes permisos para acceder al portafolio de Argentina")
             return None
     except Exception as e:
-        st.error(f"Error al obtener portafolio: {str(e)}")
+        st.error(f"Error al obtener portafolio Argentina: {str(e)}")
         return None
 
-def obtener_portafolio_eeuu(token_portador, cliente_id):
-    """Obtiene el portafolio de EEUU del cliente"""
-    url = f'https://api.invertironline.com/api/v2/portafolio/{cliente_id}/eeuu'
+def obtener_portafolio_eeuu(token_portador):
+    """Obtiene el portafolio de Estados Unidos"""
+    url = 'https://api.invertironline.com/api/v2/portafolio/estados_Unidos'
     headers = obtener_encabezado_autorizacion(token_portador)
     
     try:
         response = requests.get(url, headers=headers, timeout=30)
         if response.status_code == 200:
             return response.json()
+        elif response.status_code == 500:
+            st.warning("⚠️ No se pudo obtener el portafolio de Estados Unidos")
+            return None
         else:
             st.error(f"Error al obtener portafolio EEUU: {response.status_code}")
+            if response.status_code == 401:
+                st.error("Token de acceso inválido o expirado")
+            elif response.status_code == 403:
+                st.error("No tienes permisos para acceder al portafolio de Estados Unidos")
             return None
     except Exception as e:
         st.error(f"Error al obtener portafolio EEUU: {str(e)}")
         return None
 
-def obtener_estado_cuenta(token_portador, cliente_id):
-    """Obtiene el estado de cuenta del cliente"""
-    url = f'https://api.invertironline.com/api/v2/estadocuenta/{cliente_id}'
+def obtener_estado_cuenta(token_portador):
+    """Obtiene el estado de cuenta general"""
+    url = 'https://api.invertironline.com/api/v2/estadocuenta'
     headers = obtener_encabezado_autorizacion(token_portador)
     
     try:
         response = requests.get(url, headers=headers, timeout=30)
         if response.status_code == 200:
             return response.json()
+        elif response.status_code == 500:
+            st.warning("⚠️ No se pudo obtener el estado de cuenta")
+            return None
         else:
             st.error(f"Error al obtener estado de cuenta: {response.status_code}")
+            if response.status_code == 401:
+                st.error("Token de acceso inválido o expirado")
+            elif response.status_code == 403:
+                st.error("No tienes permisos para acceder al estado de cuenta")
             return None
     except Exception as e:
         st.error(f"Error al obtener estado de cuenta: {str(e)}")
         return None
 
-def obtener_estado_cuenta_eeuu(token_portador):
-    """Obtiene el estado de cuenta de EEUU"""
-    url = 'https://api.invertironline.com/api/v2/estadocuenta/eeuu'
+def filtrar_estado_cuenta_por_moneda(estado_cuenta, moneda="peso_Argentino"):
+    """Filtra el estado de cuenta por moneda"""
+    if not estado_cuenta or 'cuentas' not in estado_cuenta:
+        return None
+    
+    cuentas_filtradas = [cuenta for cuenta in estado_cuenta['cuentas'] if cuenta.get('moneda') == moneda]
+    
+    if cuentas_filtradas:
+        return {
+            'cuentas': cuentas_filtradas,
+            'estadisticas': estado_cuenta.get('estadisticas', []),
+            'totalEnPesos': estado_cuenta.get('totalEnPesos', 0)
+        }
+    return None
+
+def obtener_movimientos(token_portador, fecha_desde=None, fecha_hasta=None, pais="argentina"):
+    """
+    Obtiene los movimientos/operaciones de la cuenta usando la API de InvertirOnline
+    
+    Args:
+        token_portador (str): Token de acceso para la autenticación
+        fecha_desde (str): Fecha desde en formato YYYY-MM-DD (opcional)
+        fecha_hasta (str): Fecha hasta en formato YYYY-MM-DD (opcional)
+        pais (str): País para filtrar operaciones (argentina/estados_Unidos)
+    
+    Returns:
+        list: Lista de operaciones/movimientos de la cuenta
+    """
+    url = 'https://api.invertironline.com/api/v2/operaciones'
+    
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    # Parámetros de consulta para filtrar por fechas
+    params = {
+        'filtro.pais': pais
+    }
+    if fecha_desde:
+        params['filtro.fechaDesde'] = fecha_desde
+    if fecha_hasta:
+        params['filtro.fechaHasta'] = fecha_hasta
+    
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+        
+        if response.status_code == 200:
+            operaciones = response.json()
+            return operaciones
+        else:
+            st.error(f"Error al obtener movimientos: {response.status_code}")
+            return []
+            
+    except Exception as e:
+        st.error(f"Error al obtener movimientos: {str(e)}")
+        return []
+
+def obtener_notificaciones(token_portador):
+    """Obtiene las notificaciones del asesor"""
+    url = 'https://api.invertironline.com/api/v2/Notificacion'
     headers = obtener_encabezado_autorizacion(token_portador)
     
     try:
         response = requests.get(url, headers=headers, timeout=30)
         if response.status_code == 200:
-            return response.json()
+            notificaciones = response.json()
+            return notificaciones if isinstance(notificaciones, list) else [notificaciones]
+        elif response.status_code == 500:
+            st.warning("⚠️ No se pudieron obtener las notificaciones")
+            return []
         else:
-            st.error(f"Error al obtener estado de cuenta EEUU: {response.status_code}")
-            return None
+            st.error(f"Error al obtener notificaciones: {response.status_code}")
+            return []
     except Exception as e:
-        st.error(f"Error al obtener estado de cuenta EEUU: {str(e)}")
-        return None
+        st.error(f"Error al obtener notificaciones: {str(e)}")
+        return []
+
+def calcular_valor_portafolio_historico(token_portador, operaciones, fecha_desde=None, fecha_hasta=None):
+    """
+    Calcula el valor del portafolio a lo largo del tiempo basado en operaciones históricas
+    
+    Args:
+        token_portador (str): Token de acceso para la autenticación
+        operaciones (list): Lista de operaciones obtenidas de la API
+        fecha_desde (str): Fecha desde en formato YYYY-MM-DD (opcional)
+        fecha_hasta (str): Fecha hasta en formato YYYY-MM-DD (opcional)
+    
+    Returns:
+        tuple: (DataFrame con valores del portafolio, posiciones actuales, DataFrame de flujo de efectivo)
+    """
+    if not operaciones:
+        return None, {}, None
+    
+    # Convertir operaciones a DataFrame
+    df_ops = pd.DataFrame(operaciones)
+    df_ops['fechaOrden'] = pd.to_datetime(df_ops['fechaOrden'], format='mixed')
+    df_ops = df_ops.sort_values('fechaOrden')
+    
+    # Obtener símbolos únicos
+    simbolos = df_ops['simbolo'].unique()
+    
+    # Calcular posición actual por símbolo y flujo de efectivo
+    posiciones = {}
+    flujo_efectivo = []
+    
+    for simbolo in simbolos:
+        ops_simbolo = df_ops[df_ops['simbolo'] == simbolo]
+        cantidad_total = 0
+        
+        for _, op in ops_simbolo.iterrows():
+            if op['tipo'] == 'Compra':
+                cantidad_total += op['cantidadOperada']
+                flujo_efectivo.append({
+                    'fecha': op['fechaOrden'],
+                    'tipo': 'Compra',
+                    'simbolo': simbolo,
+                    'monto': -op['montoOperado'],  # Salida de efectivo
+                    'cantidad': op['cantidadOperada'],
+                    'precio': op['precioOperado']
+                })
+            elif op['tipo'] == 'Venta':
+                cantidad_total -= op['cantidadOperada']
+                flujo_efectivo.append({
+                    'fecha': op['fechaOrden'],
+                    'tipo': 'Venta',
+                    'simbolo': simbolo,
+                    'monto': op['montoOperado'],  # Entrada de efectivo
+                    'cantidad': op['cantidadOperada'],
+                    'precio': op['precioOperado']
+                })
+        
+        posiciones[simbolo] = cantidad_total
+    
+    # Crear DataFrame de flujo de efectivo
+    df_flujo = pd.DataFrame(flujo_efectivo)
+    if not df_flujo.empty:
+        df_flujo = df_flujo.sort_values('fecha')
+        df_flujo['valor_acumulado'] = df_flujo['monto'].cumsum()
+    
+    # Crear serie temporal del valor del portafolio
+    if fecha_desde:
+        fecha_inicio = pd.to_datetime(fecha_desde).date()
+    else:
+        fecha_inicio = df_ops['fechaOrden'].min().date()
+    
+    if fecha_hasta:
+        fecha_fin = pd.to_datetime(fecha_hasta).date()
+    else:
+        fecha_fin = datetime.now().date()
+    
+    fechas = pd.date_range(start=fecha_inicio, end=fecha_fin, freq='D')
+    
+    valores_portafolio = []
+    for fecha in fechas:
+        # Buscar el último valor acumulado hasta esa fecha
+        if not df_flujo.empty:
+            valores_hasta_fecha = df_flujo[df_flujo['fecha'] <= fecha]
+            if not valores_hasta_fecha.empty:
+                valor = valores_hasta_fecha['valor_acumulado'].iloc[-1]
+            else:
+                valor = 0
+        else:
+            valor = 0
+        valores_portafolio.append(valor)
+    
+    # Crear DataFrame final
+    df_portafolio = pd.DataFrame({
+        'fecha': fechas,
+        'valor': valores_portafolio
+    })
+    
+    return df_portafolio, posiciones, df_flujo
 
 # --- Funciones de Análisis ---
 
@@ -204,91 +380,71 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
     if id_cliente:
         cliente_info = st.session_state.get('cliente_seleccionado', {})
         
-        # Dashboard del cliente con métricas avanzadas
+        # Dashboard compacto del cliente
         st.markdown("### 👤 Dashboard del Cliente")
         
-        # Métricas principales en cards estilizados
-        col1, col2, col3, col4 = st.columns(4)
+        # Primera fila: Información básica del cliente
+        col_info1, col_info2, col_info3, col_info4 = st.columns(4)
         
-        with col1:
+        with col_info1:
             nombre_completo = cliente_info.get('apellidoYNombre', cliente_info.get('nombre', 'Cliente'))
-            st.metric("👤 Cliente", nombre_completo)
+            st.metric("👤 Cliente", nombre_completo, help="Nombre del cliente")
         
-        with col2:
+        with col_info2:
             numero_cliente = cliente_info.get('numeroCliente', cliente_info.get('id', 'N/A'))
-            st.metric("🆔 ID Cliente", numero_cliente)
+            st.metric("🆔 ID", numero_cliente, help="ID del cliente")
         
-        with col3:
+        with col_info3:
             numero_cuenta = cliente_info.get('numeroCuenta', 'N/A')
-            st.metric("🏦 Nº Cuenta", numero_cuenta)
+            st.metric("🏦 Cuenta", numero_cuenta, help="Número de cuenta")
         
-        with col4:
-            st.metric("📊 Portafolio", portfolio_id.upper() if portfolio_id else "General")
+        with col_info4:
+            st.metric("📊 Mercado", portfolio_id.upper() if portfolio_id else "General", help="Mercado del portafolio")
         
-        # Aplicar estilos a las métricas con CSS personalizado
-        st.markdown("""
-        <style>
-        .metric-card {
-            background-color: #f0f2f6;
-            border-left: 4px solid #1f77b4;
-            border: 1px solid #1f77b4;
-            border-radius: 8px;
-            padding: 1rem;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        </style>
-        """, unsafe_allow_html=True)
-        
-        # Estado financiero en dashboard avanzado
+        # Segunda fila: Estado financiero compacto
         st.markdown("### 💰 Estado Financiero")
         
-        # Crear DataFrame para visualización avanzada
-        fin_data = {
-            'Métrica': ['Disponible ARS', 'Disponible USD', 'Total Portafolio', 'Total Cuenta'],
-            'Valor': [
-                cliente_info.get('disponibleOperarPesos', 0),
-                cliente_info.get('disponibleOperarDolares', 0),
-                cliente_info.get('totalPortafolio', 0),
-                cliente_info.get('totalCuentaValorizado', 0)
-            ],
-            'Moneda': ['ARS', 'USD', 'ARS', 'ARS'],
-            'Icono': ['💵', '💲', '📈', '💰']
-        }
-        
-        df_fin = pd.DataFrame(fin_data)
-        
-        # Métricas financieras con diseño mejorado
         col_fin1, col_fin2, col_fin3, col_fin4 = st.columns(4)
         
-        for i, col in enumerate([col_fin1, col_fin2, col_fin3, col_fin4]):
-            with col:
-                valor = fin_data['Valor'][i]
-                moneda = fin_data['Moneda'][i]
-                icono = fin_data['Icono'][i]
-                metrica = fin_data['Métrica'][i]
-                
-                if moneda == 'USD':
-                    display_valor = f"USD {valor:,.2f}"
-                else:
-                    display_valor = f"AR$ {valor:,.2f}"
-                
-                st.metric(metrica, display_valor)
+        with col_fin1:
+            disponible_ars = cliente_info.get('disponibleOperarPesos', 0)
+            st.metric("💵 Disponible ARS", f"AR$ {disponible_ars:,.2f}", help="Dinero disponible en pesos")
         
-        # Gráfico de estado financiero
+        with col_fin2:
+            disponible_usd = cliente_info.get('disponibleOperarDolares', 0)
+            st.metric("💲 Disponible USD", f"USD {disponible_usd:,.2f}", help="Dinero disponible en dólares")
+        
+        with col_fin3:
+            total_portafolio = cliente_info.get('totalPortafolio', 0)
+            st.metric("📈 Total Portafolio", f"AR$ {total_portafolio:,.2f}", help="Valor total del portafolio")
+        
+        with col_fin4:
+            total_cuenta = cliente_info.get('totalCuentaValorizado', 0)
+            st.metric("💰 Total Cuenta", f"AR$ {total_cuenta:,.2f}", help="Valor total de la cuenta")
+        
+        # Gráfico compacto de estado financiero
+        fin_data = {
+            'Métrica': ['Disponible ARS', 'Disponible USD', 'Total Portafolio', 'Total Cuenta'],
+            'Valor': [disponible_ars, disponible_usd, total_portafolio, total_cuenta],
+            'Color': ['#2ecc71', '#3498db', '#e74c3c', '#f39c12']
+        }
+        
         fig_fin = px.bar(
-            df_fin, 
-            x='Métrica', 
+            pd.DataFrame(fin_data),
+            x='Métrica',
             y='Valor',
             color='Métrica',
-            title="Distribución del Capital",
-            color_discrete_sequence=px.colors.qualitative.Set3
+            title="Resumen Financiero",
+            color_discrete_sequence=['#2ecc71', '#3498db', '#e74c3c', '#f39c12']
         )
         fig_fin.update_layout(
-            height=400,
+            height=250,
             showlegend=False,
-            xaxis_title="Métricas Financieras",
-            yaxis_title="Valor"
+            xaxis_title="",
+            yaxis_title="Valor (AR$)",
+            margin=dict(l=0, r=0, t=40, b=0)
         )
+        fig_fin.update_xaxes(tickangle=45)
         st.plotly_chart(fig_fin, use_container_width=True)
     
     activos = portafolio.get('activos', [])
@@ -317,10 +473,10 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
         portafolio_dict = {row['Símbolo']: row for row in datos_activos}
         metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
         
-        # Dashboard del portafolio con análisis avanzado
-        st.markdown("### 📊 Análisis del Portafolio")
+        # Dashboard compacto del portafolio
+        st.markdown("### 📊 Resumen del Portafolio")
         
-        # Métricas del portafolio con diseño avanzado
+        # Métricas compactas del portafolio
         col_port1, col_port2, col_port3, col_port4 = st.columns(4)
         
         with col_port1:
@@ -333,21 +489,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
             st.metric("🏷️ Tipos", df_activos['Tipo'].nunique(), help="Categorías de activos")
         
         with col_port4:
-            st.metric("💰 Valor", f"AR$ {valor_total:,.0f}", help="Valor total")
-        
-        # Aplicar estilos a las métricas del portafolio con CSS personalizado
-        st.markdown("""
-        <style>
-        .portfolio-metric {
-            background-color: #fff3e0;
-            border-left: 4px solid #ff7f0e;
-            border: 1px solid #ff7f0e;
-            border-radius: 8px;
-            padding: 1rem;
-            box-shadow: 0 2px 4px rgba(255,127,14,0.2);
-        }
-        </style>
-        """, unsafe_allow_html=True)
+            st.metric("💰 Valor Total", f"AR$ {valor_total:,.0f}", help="Valor total del portafolio")
         
         if metricas:
             # Dashboard de Riesgo y Rendimiento
@@ -613,6 +755,25 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
     else:
         st.warning("No se encontraron activos en el portafolio")
 
+def mostrar_notificaciones(notificaciones):
+    """
+    Muestra las notificaciones del asesor
+    
+    Args:
+        notificaciones (list): Lista de notificaciones
+    """
+    st.markdown("### 🔔 Notificaciones")
+    
+    if not notificaciones:
+        st.info("No hay notificaciones disponibles")
+        return
+    
+    for i, notif in enumerate(notificaciones):
+        with st.expander(f"📢 {notif.get('titulo', 'Notificación')}", expanded=False):
+            st.markdown(f"**Mensaje:** {notif.get('mensaje', 'Sin mensaje')}")
+            if notif.get('link'):
+                st.markdown(f"**Link:** [{notif.get('link')}]({notif.get('link')})")
+
 def mostrar_estado_cuenta(estado_cuenta, es_eeuu=False):
     """
     Muestra el estado de cuenta, con soporte para cuentas filtradas de EEUU
@@ -638,24 +799,39 @@ def mostrar_analisis_portafolio():
         st.error("No se ha seleccionado ningún cliente")
         return
 
-    id_cliente = cliente.get('numeroCliente', cliente.get('id'))
     nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
 
     st.title(f"Análisis de Portafolio - {nombre_cliente}")
     
+    # Obtener fechas del sidebar
+    fecha_desde = st.session_state.get('fecha_desde', date.today() - timedelta(days=365))
+    fecha_hasta = st.session_state.get('fecha_hasta', date.today())
+    
     # Cargar datos una sola vez y cachearlos
     @st.cache_data(ttl=300)  # Cache por 5 minutos
-    def cargar_datos_cliente(token, cliente_id):
-        """Carga y cachea los datos del cliente para evitar llamadas repetitivas"""
-        portafolio_ar = obtener_portafolio(token, cliente_id, 'Argentina')
-        portafolio_eeuu = obtener_portafolio_eeuu(token, cliente_id)
-        estado_cuenta_ar = obtener_estado_cuenta(token, cliente_id)
-        estado_cuenta_eeuu = obtener_estado_cuenta_eeuu(token)
-        return portafolio_ar, portafolio_eeuu, estado_cuenta_ar, estado_cuenta_eeuu
+    def cargar_datos_completos(token, fecha_desde, fecha_hasta):
+        """Carga y cachea todos los datos necesarios"""
+        portafolio_ar = obtener_portafolio_argentina(token)
+        portafolio_eeuu = obtener_portafolio_eeuu(token)
+        estado_cuenta = obtener_estado_cuenta(token)
+        
+        # Obtener movimientos históricos
+        movimientos_ar = obtener_movimientos(token, fecha_desde.strftime('%Y-%m-%d'), fecha_hasta.strftime('%Y-%m-%d'), 'argentina')
+        movimientos_eeuu = obtener_movimientos(token, fecha_desde.strftime('%Y-%m-%d'), fecha_hasta.strftime('%Y-%m-%d'), 'estados_Unidos')
+        
+        # Calcular valor histórico del portafolio
+        valor_historico_ar = calcular_valor_portafolio_historico(token, movimientos_ar, fecha_desde.strftime('%Y-%m-%d'), fecha_hasta.strftime('%Y-%m-%d'))
+        valor_historico_eeuu = calcular_valor_portafolio_historico(token, movimientos_eeuu, fecha_desde.strftime('%Y-%m-%d'), fecha_hasta.strftime('%Y-%m-%d'))
+        
+        return (portafolio_ar, portafolio_eeuu, estado_cuenta, 
+                movimientos_ar, movimientos_eeuu, 
+                valor_historico_ar, valor_historico_eeuu)
     
     # Cargar datos con cache
-    with st.spinner("🔄 Cargando datos del cliente..."):
-        portafolio_ar, portafolio_eeuu, estado_cuenta_ar, estado_cuenta_eeuu = cargar_datos_cliente(token_acceso, id_cliente)
+    with st.spinner("🔄 Cargando datos del cliente y movimientos históricos..."):
+        (portafolio_ar, portafolio_eeuu, estado_cuenta, 
+         movimientos_ar, movimientos_eeuu, 
+         valor_historico_ar, valor_historico_eeuu) = cargar_datos_completos(token_acceso, fecha_desde, fecha_hasta)
     
     # Crear tabs con iconos
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
