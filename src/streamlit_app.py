@@ -5351,7 +5351,7 @@ def obtener_estimacion_compra_mep(token_acceso, monto):
         
         if response.status_code == 200:
             return response.json()
-    else:
+        else:
             st.error(f'Error obteniendo estimación compra: {response.status_code}')
             return None
             
