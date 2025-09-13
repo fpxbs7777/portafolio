@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import plotly.graph_objects as go
+import plotly.express as px
 import pandas as pd
 from plotly.subplots import make_subplots
 from datetime import date, timedelta, datetime
@@ -718,6 +719,39 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
         st.error(f'Error al obtener portafolio: {str(e)}')
         return None
 
+def obtener_datos_perfil(token_portador):
+    """
+    Obtiene los datos del perfil del cliente
+    
+    Args:
+        token_portador (str): Token de autenticación
+        
+    Returns:
+        dict: Datos del perfil del cliente o None en caso de error
+    """
+    url_perfil = 'https://api.invertironline.com/api/v2/datos-perfil'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        respuesta = requests.get(url_perfil, headers=encabezados, timeout=30)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        elif respuesta.status_code == 401:
+            st.error("Error de autenticación al obtener datos del perfil")
+            return None
+        elif respuesta.status_code == 404:
+            st.warning("No se encontraron datos del perfil")
+            return None
+        else:
+            st.error(f"Error HTTP {respuesta.status_code} al obtener datos del perfil")
+            return None
+    except requests.exceptions.Timeout:
+        st.error("Timeout al obtener datos del perfil")
+        return None
+    except Exception as e:
+        st.error(f'Error al obtener datos del perfil: {str(e)}')
+        return None
+
 def obtener_portafolio_eeuu(token_portador, id_cliente):
     """
     Obtiene el portafolio de Estados Unidos de un cliente específico
@@ -733,8 +767,6 @@ def obtener_portafolio_eeuu(token_portador, id_cliente):
     url_portafolio_asesores = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/estados_Unidos'
     encabezados = obtener_encabezado_autorizacion(token_portador)
     
-    st.info(f"🔍 Intentando obtener portafolio EEUU del cliente {id_cliente}")
-    st.info(f"🔑 Token válido: {'Sí' if token_portador else 'No'}")
     
     try:
         # Primer intento: endpoint de Asesores
@@ -742,7 +774,6 @@ def obtener_portafolio_eeuu(token_portador, id_cliente):
         
         if respuesta.status_code == 200:
             data = respuesta.json()
-            st.success(f"✅ Portafolio EEUU obtenido vía Asesores: {len(data.get('activos', []))} activos")
             return data
         elif respuesta.status_code == 404:
             st.info("ℹ️ No se encontró portafolio EEUU vía Asesores, intentando endpoint directo...")
@@ -842,7 +873,7 @@ def obtener_estado_cuenta_eeuu(token_portador):
                 if cuentas_eeuu:
                     st.success(f"✅ Estado de cuenta EEUU filtrado: {len(cuentas_eeuu)} cuentas de EEUU")
                 else:
-                    st.info("ℹ️ No se encontraron cuentas específicas de EEUU")
+                    pass
                 
                 return data_eeuu
                 
@@ -4046,6 +4077,38 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
 def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
     st.markdown("### 📈 Resumen del Portafolio")
     
+    # Obtener datos del perfil del cliente
+    datos_perfil = obtener_datos_perfil(token_portador)
+    if datos_perfil:
+        st.markdown("#### 👤 Perfil del Cliente")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Nombre", f"{datos_perfil.get('nombre', 'N/A')} {datos_perfil.get('apellido', 'N/A')}")
+        with col2:
+            st.metric("DNI", datos_perfil.get('dni', 'N/A'))
+        with col3:
+            st.metric("CUIL/CUIT", datos_perfil.get('cuitCuil', 'N/A'))
+        with col4:
+            perfil_inversor = datos_perfil.get('perfilInversor', 'N/A')
+            color_perfil = {
+                'Conservador': '🟢',
+                'Moderado': '🟡', 
+                'Agresivo': '🔴',
+                'N/A': '⚪'
+            }.get(perfil_inversor, '⚪')
+            st.metric("Perfil Inversor", f"{color_perfil} {perfil_inversor}")
+        
+        # Información adicional del perfil
+        col5, col6 = st.columns(2)
+        with col5:
+            st.info(f"📧 Email: {datos_perfil.get('email', 'N/A')}")
+        with col6:
+            cuenta_abierta = "✅ Abierta" if datos_perfil.get('cuentaAbierta', False) else "❌ Cerrada"
+            st.info(f"🏦 Cuenta: {cuenta_abierta}")
+        
+        st.markdown("---")
+    
     activos = portafolio.get('activos', [])
     datos_activos = []
     valor_total = 0
@@ -4364,14 +4427,14 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
                         st.dataframe(percentil_df, use_container_width=True)
             
             with col2:
-                st.markdown("#### 📊 Distribuciones")
+                st.markdown("#### 📊 Distribución del Valorizado")
                 
                 # Opciones de visualización
                 tipo_grafico = st.selectbox(
                     "Tipo de Gráfico:",
                     ["Histograma", "Box Plot", "Violin Plot", "Density Plot"],
                     help="Seleccione el tipo de visualización para los valores de activos",
-                    key="tipo_grafico_distribuciones"
+                    key="tipo_grafico_distribuciones_analisis"
                 )
                 
                 valores = [a['Valuación'] for a in datos_activos if a['Valuación'] > 0]
@@ -4384,8 +4447,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
                             opacity=0.7
                         )])
                         fig.update_layout(
-                            title="Distribución de Valores de Activos",
-                            xaxis_title="Valor ($)",
+                            title="Distribución del Valorizado de Activos",
+                            xaxis_title="Valorizado ($)",
                             yaxis_title="Frecuencia",
                             height=400
                         )
@@ -4394,12 +4457,12 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
                     elif tipo_grafico == "Box Plot":
                         fig = go.Figure(data=[go.Box(
                             y=valores,
-                            name="Valores",
+                            name="Valorizado",
                             marker_color='#0d6efd'
                         )])
                         fig.update_layout(
-                            title="Box Plot de Valores de Activos",
-                            yaxis_title="Valor ($)",
+                            title="Box Plot del Valorizado de Activos",
+                            yaxis_title="Valorizado ($)",
                             height=400
                         )
                         st.plotly_chart(fig, use_container_width=True)
@@ -4407,12 +4470,12 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
                     elif tipo_grafico == "Violin Plot":
                         fig = go.Figure(data=[go.Violin(
                             y=valores,
-                            name="Valores",
+                            name="Valorizado",
                             marker_color='#0d6efd'
                         )])
                         fig.update_layout(
-                            title="Violin Plot de Valores de Activos",
-                            yaxis_title="Valor ($)",
+                            title="Violin Plot del Valorizado de Activos",
+                            yaxis_title="Valorizado ($)",
                             height=400
                         )
                         st.plotly_chart(fig, use_container_width=True)
@@ -4426,12 +4489,12 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
                             x=bin_centers,
                             y=hist,
                             mode='lines+markers',
-                            name="Densidad",
+                            name="Densidad Valorizado",
                             line=dict(color='#0d6efd', width=3)
                         )])
                         fig.update_layout(
-                            title="Density Plot de Valores de Activos",
-                            xaxis_title="Valor ($)",
+                            title="Density Plot del Valorizado de Activos",
+                            xaxis_title="Valorizado ($)",
                             yaxis_title="Densidad",
                             height=400
                         )
@@ -4730,6 +4793,88 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
                 **⚠️ Revisar Balance Riesgo-Retorno**  
                 El riesgo podría ser alto en relación al retorno esperado.
                 """)
+        
+        # Gráfico de Composición del Portafolio
+        st.subheader("🥧 Composición del Portafolio")
+        
+        # Calcular pesos porcentuales
+        df_activos['Peso (%)'] = (df_activos['Valuación'] / valor_total * 100).round(2)
+        
+        # Crear gráfico de torta de composición
+        if len(df_activos) > 0:
+            # Filtrar activos con valuación > 0
+            df_activos_filtrado = df_activos[df_activos['Valuación'] > 0].copy()
+            
+            if len(df_activos_filtrado) > 0:
+                # Agrupar activos pequeños en "Otros" si hay muchos
+                if len(df_activos_filtrado) > 10:
+                    # Mantener los top 8 y agrupar el resto
+                    df_activos_ordenado = df_activos_filtrado.sort_values('Valuación', ascending=False)
+                    df_top = df_activos_ordenado.head(8)
+                    df_otros = df_activos_ordenado.tail(len(df_activos_ordenado) - 8)
+                    
+                    if len(df_otros) > 0:
+                        otros_valor = df_otros['Valuación'].sum()
+                        otros_peso = df_otros['Peso (%)'].sum()
+                        
+                        # Crear fila de "Otros"
+                        fila_otros = pd.DataFrame({
+                            'Símbolo': ['Otros'],
+                            'Descripción': [f'{len(df_otros)} activos más'],
+                            'Tipo': ['Varios'],
+                            'Cantidad': [0],
+                            'Valuación': [otros_valor],
+                            'Peso (%)': [otros_peso]
+                        })
+                        
+                        df_para_grafico = pd.concat([df_top, fila_otros], ignore_index=True)
+                    else:
+                        df_para_grafico = df_top
+                else:
+                    df_para_grafico = df_activos_filtrado
+                
+                # Crear gráfico de torta
+                fig_composicion = go.Figure(data=[go.Pie(
+                    labels=df_para_grafico['Símbolo'],
+                    values=df_para_grafico['Valuación'],
+                    textinfo='label+percent',
+                    texttemplate='%{label}<br>%{percent}<br>$%{value:,.0f}',
+                    hovertemplate='<b>%{label}</b><br>' +
+                                  'Valor: $%{value:,.2f}<br>' +
+                                  'Peso: %{percent}<br>' +
+                                  '<extra></extra>',
+                    marker=dict(
+                        colors=px.colors.qualitative.Set3[:len(df_para_grafico)],
+                        line=dict(color='#FFFFFF', width=2)
+                    )
+                )])
+                
+                fig_composicion.update_layout(
+                    title="Composición del Portafolio por Valor",
+                    height=500,
+                    showlegend=True,
+                    legend=dict(
+                        orientation="v",
+                        yanchor="middle",
+                        y=0.5,
+                        xanchor="left",
+                        x=1.01
+                    )
+                )
+                
+                st.plotly_chart(fig_composicion, use_container_width=True)
+                
+                # Mostrar tabla detallada de composición
+                st.markdown("#### 📊 Detalle de Composición")
+                df_composicion_detalle = df_para_grafico[['Símbolo', 'Descripción', 'Tipo', 'Valuación', 'Peso (%)']].copy()
+                df_composicion_detalle['Valuación'] = df_composicion_detalle['Valuación'].apply(lambda x: f"${x:,.2f}")
+                df_composicion_detalle['Peso (%)'] = df_composicion_detalle['Peso (%)'].apply(lambda x: f"{x:.2f}%")
+                
+                st.dataframe(df_composicion_detalle, use_container_width=True, hide_index=True)
+            else:
+                st.warning("No hay activos con valuación válida para mostrar la composición")
+        else:
+            st.warning("No hay datos suficientes para mostrar la composición")
     else:
         st.warning("No se encontraron activos en el portafolio")
 
@@ -4781,7 +4926,7 @@ def mostrar_estado_cuenta(estado_cuenta, es_eeuu=False):
             # Mostrar resumen específico para EEUU
             st.info(f"💡 **Resumen EEUU**: {total_cuentas_eeuu} cuentas con saldo total de AR$ {total_en_pesos:,.2f}")
         else:
-            st.info("ℹ️ No se encontraron cuentas específicas de EEUU")
+            pass
     else:
         # Estado de cuenta general (no filtrado)
         total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
