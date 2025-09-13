@@ -611,7 +611,7 @@ def obtener_detalle_operacion(token_portador, numero_operacion):
         st.error(f"Error al obtener detalle de operación {numero_operacion}: {str(e)}")
         return None
 
-def obtener_operaciones_filtradas(token_portador, numero=None, estado=None, fecha_desde=None, fecha_hasta=None, pais="argentina"):
+def obtener_operaciones_filtradas(token_portador, numero=None, estado=None, fecha_desde=None, fecha_hasta=None, pais="argentina", cuenta_comitente=None):
     """Obtiene operaciones con filtros avanzados"""
     url = 'https://api.invertironline.com/api/v2/operaciones'
     headers = obtener_encabezado_autorizacion(token_portador)
@@ -627,11 +627,29 @@ def obtener_operaciones_filtradas(token_portador, numero=None, estado=None, fech
         params['filtro.fechaHasta'] = fecha_hasta
     if pais:
         params['filtro.pais'] = pais
+    if cuenta_comitente:
+        params['filtro.cuentaComitente'] = cuenta_comitente
     
     try:
+        # Debug: mostrar parámetros
+        st.info(f"🔗 Consultando operaciones desde {fecha_desde or 'inicio'} hasta {fecha_hasta or 'actual'}")
+        st.info(f"🔗 URL: {url}")
+        st.info(f"🔗 Parámetros: {params}")
+        
         response = requests.get(url, headers=headers, params=params, timeout=30)
         if response.status_code == 200:
-            return response.json()
+            operaciones = response.json()
+            st.success(f"📊 Se obtuvieron {len(operaciones)} operaciones")
+            
+            # Mostrar información de debug
+            if operaciones:
+                st.info(f"🔍 Primeras 3 operaciones: {operaciones[:3]}")
+                simbolos_encontrados = list(set([op.get('simbolo', 'N/A') for op in operaciones]))
+                st.info(f"🔍 Símbolos encontrados: {simbolos_encontrados}")
+            else:
+                st.warning("⚠️ No se encontraron operaciones en el período especificado")
+            
+            return operaciones
         else:
             st.error(f"Error al obtener operaciones filtradas: {response.status_code}")
             return []
@@ -2612,7 +2630,8 @@ def mostrar_analisis_portafolio():
                         token_acceso,
                         fecha_desde=fecha_desde.isoformat(),
                         fecha_hasta=fecha_hasta.isoformat(),
-                        pais="argentina"
+                        pais="argentina",
+                        cuenta_comitente=id_cliente
                     )
                     
                     # Obtener operaciones de Estados Unidos
@@ -2620,7 +2639,8 @@ def mostrar_analisis_portafolio():
                         token_acceso,
                         fecha_desde=fecha_desde.isoformat(),
                         fecha_hasta=fecha_hasta.isoformat(),
-                        pais="estados_Unidos"
+                        pais="estados_Unidos",
+                        cuenta_comitente=id_cliente
                     )
                     
                     # Combinar operaciones
