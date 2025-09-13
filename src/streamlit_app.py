@@ -685,11 +685,19 @@ def obtener_movimientos_asesor(token_portador, clientes=None, fecha_desde=None, 
         data['cuentaComitente'] = cuenta_comitente
     
     try:
+        # Debug: mostrar información de la consulta
+        st.info(f"🔗 Consultando movimientos del asesor para cliente {cuenta_comitente}")
+        st.info(f"🔗 URL: {url}")
+        st.info(f"🔗 Datos enviados: {data}")
+        
         response = requests.post(url, headers=headers, json=data, timeout=30)
         if response.status_code == 200:
-            return response.json()
+            resultado = response.json()
+            st.success(f"📊 Respuesta recibida del endpoint de asesor")
+            return resultado
         else:
             st.error(f"Error al obtener movimientos del asesor: {response.status_code}")
+            st.error(f"Respuesta: {response.text}")
             return {}
     except Exception as e:
         st.error(f"Error al obtener movimientos del asesor: {str(e)}")
@@ -2625,32 +2633,18 @@ def mostrar_analisis_portafolio():
         if st.button("🔍 Analizar Operaciones Reales", type="primary"):
             if id_cliente:
                 with st.spinner("Obteniendo operaciones..."):
-                    # Obtener operaciones de Argentina
-                    operaciones_ar = obtener_operaciones_filtradas(
+                    # Obtener operaciones usando la función específica para asesores
+                    operaciones = obtener_movimientos_asesor(
                         token_acceso,
+                        clientes=[id_cliente],  # Lista de clientes
                         fecha_desde=fecha_desde.isoformat(),
                         fecha_hasta=fecha_hasta.isoformat(),
-                        pais="argentina",
-                        cuenta_comitente=id_cliente
+                        tipo_fecha="fechaOrden",  # Tipo de fecha a filtrar
+                        estado="terminada"  # Solo operaciones terminadas
                     )
                     
-                    # Obtener operaciones de Estados Unidos
-                    operaciones_eeuu = obtener_operaciones_filtradas(
-                        token_acceso,
-                        fecha_desde=fecha_desde.isoformat(),
-                        fecha_hasta=fecha_hasta.isoformat(),
-                        pais="estados_Unidos",
-                        cuenta_comitente=id_cliente
-                    )
-                    
-                    # Combinar operaciones
-                    operaciones = (operaciones_ar or []) + (operaciones_eeuu or [])
-                
                 if operaciones:
-                    total_ar = len(operaciones_ar or [])
-                    total_eeuu = len(operaciones_eeuu or [])
-                    st.success(f"✅ Se obtuvieron {len(operaciones)} operaciones totales")
-                    st.info(f"📊 Desglose: {total_ar} operaciones Argentina + {total_eeuu} operaciones EEUU")
+                    st.success(f"✅ Se obtuvieron {len(operaciones)} operaciones del cliente {id_cliente}")
                     
                     # Mostrar resumen de operaciones
                     st.subheader("📊 Resumen de Operaciones")
