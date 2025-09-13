@@ -2449,7 +2449,7 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
             
             if retornos.empty:
                 st.error("❌ No se pudieron calcular retornos válidos")
-            return None, None, None
+                return None, None, None
         
             st.success(f"✅ Datos alineados: {len(retornos)} fechas, {len(retornos.columns)} activos")
         
