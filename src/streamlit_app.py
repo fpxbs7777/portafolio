@@ -4696,17 +4696,65 @@ def obtener_parametros_operatoria_mep(token_acceso):
     }
     
     try:
+        st.info(f"🔗 Consultando parámetros MEP desde: {url}")
         response = requests.get(url, headers=headers)
         
         if response.status_code == 200:
-            return response.json()
+            datos = response.json()
+            st.info(f"📊 Respuesta de parámetros MEP: {datos}")
+            return datos
+        elif response.status_code == 401:
+            st.error("❌ Error de autorización: Token inválido o expirado")
+            st.warning("💡 Verifique que su sesión esté activa y tenga permisos para operatoria MEP")
+            return None
         else:
             st.error(f'Error obteniendo parámetros MEP: {response.status_code}')
+            st.error(f'Respuesta: {response.text}')
             return None
             
     except requests.exceptions.RequestException as e:
         st.error(f'Error en la conexión: {e}')
         return None
+
+def verificar_estado_mercado():
+    """
+    Verifica el estado real del mercado argentino basado en horarios
+    
+    Returns:
+        dict: Estado del mercado con información de horarios
+    """
+    from datetime import datetime, time
+    import pytz
+    
+    # Zona horaria de Argentina
+    tz_argentina = pytz.timezone('America/Argentina/Buenos_Aires')
+    ahora = datetime.now(tz_argentina)
+    
+    # Horarios del mercado argentino (aproximados)
+    # Lunes a Viernes: 11:00 - 17:00 (horario argentino)
+    hora_apertura = time(11, 0)  # 11:00 AM
+    hora_cierre = time(17, 0)    # 5:00 PM
+    
+    # Verificar si es día hábil (lunes a viernes)
+    es_dia_habil = ahora.weekday() < 5  # 0-4 = lunes a viernes
+    
+    # Verificar si está en horario de mercado
+    hora_actual = ahora.time()
+    en_horario = hora_apertura <= hora_actual <= hora_cierre
+    
+    # El mercado está abierto si es día hábil Y está en horario
+    mercado_abierto = es_dia_habil and en_horario
+    
+    return {
+        'esHorarioValido': mercado_abierto,
+        'esDiaHabil': es_dia_habil,
+        'enHorario': en_horario,
+        'horaActual': hora_actual.strftime('%H:%M'),
+        'diaSemana': ahora.strftime('%A'),
+        'fecha': ahora.strftime('%d/%m/%Y'),
+        'horarioApertura': hora_apertura.strftime('%H:%M'),
+        'horarioCierre': hora_cierre.strftime('%H:%M')
+    }
 
 def obtener_estimacion_compra_mep(token_acceso, monto):
     """
@@ -4870,11 +4918,17 @@ def obtener_historico_mep(token_acceso, fecha_desde, fecha_hasta):
     }
     
     try:
+        st.info(f"🔗 Consultando histórico AL30 desde: {url}")
         response = requests.get(url, headers=headers)
         
         if response.status_code == 200:
             datos_historicos = response.json()
+            st.success(f"✅ Se obtuvieron {len(datos_historicos)} registros históricos")
             return datos_historicos
+        elif response.status_code == 401:
+            st.error("❌ Error de autorización: Token inválido o expirado")
+            st.warning("💡 Verifique que su sesión esté activa y tenga permisos para acceder a datos históricos")
+            return None
         else:
             st.error(f'Error obteniendo histórico MEP: {response.status_code}')
             st.error(f'Respuesta: {response.text}')
@@ -5040,26 +5094,54 @@ def mostrar_cotizaciones_mercado(token_acceso):
     with st.expander("💱 Operar con Dólares MEP", expanded=False):
         st.info("💰 Realiza operaciones de compra y venta de dólares MEP usando la operatoria simplificada")
         
-        # Obtener parámetros de operatoria MEP
-        with st.spinner("Obteniendo parámetros de operatoria MEP..."):
-            parametros_mep = obtener_parametros_operatoria_mep(token_acceso)
+        # Verificar estado del mercado local
+        estado_mercado = verificar_estado_mercado()
         
+        # Mostrar información de horarios
+        col1, col2 = st.columns(2)
+        with col1:
+            if estado_mercado.get('esHorarioValido'):
+                st.success("🟢 Mercado abierto")
+            else:
+                st.error("🔴 Mercado cerrado")
+                if not estado_mercado.get('esDiaHabil'):
+                    st.warning(f"📅 Hoy es {estado_mercado.get('diaSemana')} - No es día hábil")
+                elif not estado_mercado.get('enHorario'):
+                    st.warning(f"⏰ Hora actual: {estado_mercado.get('horaActual')} - Fuera del horario de mercado")
+        
+        with col2:
+            st.info(f"📅 Fecha: {estado_mercado.get('fecha')}")
+            st.info(f"⏰ Horario: {estado_mercado.get('horarioApertura')} - {estado_mercado.get('horarioCierre')}")
+        
+        # Intentar obtener parámetros de operatoria MEP solo si el mercado está abierto
+        if estado_mercado.get('esHorarioValido'):
+            with st.spinner("Obteniendo parámetros de operatoria MEP..."):
+                parametros_mep = obtener_parametros_operatoria_mep(token_acceso)
+            
+            if parametros_mep:
+                st.success("✅ Parámetros de operatoria MEP obtenidos")
+                
+                # Mostrar límites si están disponibles
+                if parametros_mep.get('montoLimiteMinimo') or parametros_mep.get('montoLimiteMaximo'):
+                    col3, col4 = st.columns(2)
+                    with col3:
+                        st.info(f"📅 Límite mínimo: ${parametros_mep.get('montoLimiteMinimo', 0):,.0f}")
+                    with col4:
+                        st.info(f"📅 Límite máximo: ${parametros_mep.get('montoLimiteMaximo', 0):,.0f}")
+            else:
+                st.warning("⚠️ No se pudieron obtener los parámetros de operatoria MEP desde la API")
+                st.info("💡 Usando parámetros por defecto para operaciones MEP")
+                parametros_mep = {
+                    'montoLimiteMinimo': 1000,
+                    'montoLimiteMaximo': 1000000,
+                    'esHorarioValido': True
+                }
+        else:
+            st.warning("⚠️ El mercado está cerrado. Las operaciones MEP no están disponibles en este momento.")
+            parametros_mep = None
+        
+        # Formulario de operación solo si el mercado está abierto
         if parametros_mep:
-            st.success("✅ Parámetros de operatoria MEP obtenidos")
-            
-            # Mostrar información de horarios
-            col1, col2 = st.columns(2)
-            with col1:
-                if parametros_mep.get('esHorarioValido'):
-                    st.success("🟢 Mercado abierto")
-                else:
-                    st.error("🔴 Mercado cerrado")
-            
-            with col2:
-                st.info(f"📅 Límite mínimo: ${parametros_mep.get('montoLimiteMinimo', 0):,.0f}")
-                st.info(f"📅 Límite máximo: ${parametros_mep.get('montoLimiteMaximo', 0):,.0f}")
-            
-            # Formulario de operación
             with st.form("operar_mep_form"):
                 st.subheader("📊 Nueva Operación MEP")
                 
@@ -5140,48 +5222,109 @@ def mostrar_cotizaciones_mercado(token_acceso):
 def mostrar_analisis_tecnico(token_acceso, id_cliente):
     st.markdown("### 📊 Análisis Técnico")
     
-    with st.spinner("Obteniendo portafolio..."):
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
-    
-    if not portafolio:
-        st.warning("No se pudo obtener el portafolio del cliente")
-        return
-    
-    activos = portafolio.get('activos', [])
-    if not activos:
-        st.warning("El portafolio está vacío")
-        return
+    with st.spinner("Obteniendo portafolios..."):
+        # Obtener portafolio argentino
+        portafolio_ar = obtener_portafolio(token_acceso, id_cliente)
+        # Obtener portafolio estadounidense
+        portafolio_eeuu = obtener_portafolio_eeuu(token_acceso, id_cliente)
     
     simbolos = []
-    for activo in activos:
-        titulo = activo.get('titulo', {})
-        simbolo = titulo.get('simbolo', '')
-        if simbolo:
-            simbolos.append(simbolo)
+    simbolos_info = {}  # Para almacenar información adicional de cada símbolo
+    
+    # Procesar portafolio argentino
+    if portafolio_ar:
+        activos_ar = portafolio_ar.get('activos', [])
+        for activo in activos_ar:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', '')
+            if simbolo:
+                simbolos.append(f"🇦🇷 {simbolo}")
+                simbolos_info[f"🇦🇷 {simbolo}"] = {
+                    'simbolo': simbolo,
+                    'pais': 'Argentina',
+                    'mercado': 'bCBA'
+                }
+    
+    # Procesar portafolio estadounidense
+    if portafolio_eeuu:
+        activos_eeuu = portafolio_eeuu.get('activos', [])
+        for activo in activos_eeuu:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', '')
+            if simbolo:
+                simbolos.append(f"🇺🇸 {simbolo}")
+                simbolos_info[f"🇺🇸 {simbolo}"] = {
+                    'simbolo': simbolo,
+                    'pais': 'Estados Unidos',
+                    'mercado': 'nYSE'
+                }
     
     if not simbolos:
-        st.warning("No se encontraron símbolos válidos")
+        st.warning("No se encontraron símbolos válidos en los portafolios")
         return
     
     simbolo_seleccionado = st.selectbox(
         "Seleccione un activo para análisis técnico:",
         options=simbolos,
-        key="simbolo_analisis_tecnico"
+        key="simbolo_analisis_tecnico",
+        help="Incluye activos de los portafolios argentino y estadounidense"
     )
     
+    # Obtener información del símbolo seleccionado
+    info_simbolo = simbolos_info[simbolo_seleccionado]
+    simbolo_limpio = info_simbolo['simbolo']
+    pais = info_simbolo['pais']
+    mercado = info_simbolo['mercado']
+    
+    # Determinar si es un CEDEAR y ajustar el símbolo para TradingView
+    def es_cedear(simbolo):
+        """Identifica si un símbolo es un CEDEAR basado en patrones comunes"""
+        # Lista de CEDEARs conocidos (puede expandirse)
+        cedears_conocidos = [
+            'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'NFLX', 'AMD',
+            'INTC', 'ORCL', 'CRM', 'ADBE', 'PYPL', 'UBER', 'LYFT', 'SNAP', 'TWTR',
+            'BABA', 'NIO', 'XOM', 'JPM', 'BAC', 'WMT', 'PG', 'KO', 'PFE', 'JNJ',
+            'V', 'MA', 'DIS', 'NKE', 'HD', 'MCD', 'IBM', 'GE', 'F', 'GM', 'T',
+            'VZ', 'ATT', 'CSCO', 'QCOM', 'AVGO', 'TXN', 'AMAT', 'MU', 'LRCX',
+            'KLAC', 'MCHP', 'ADI', 'MRVL', 'SWKS', 'QRVO', 'SLAB', 'CRUS', 'SYNA'
+        ]
+        return simbolo.upper() in cedears_conocidos
+    
+    # Preparar símbolo para TradingView
+    if pais == 'Argentina' and es_cedear(simbolo_limpio):
+        simbolo_tradingview = f"BCBA:{simbolo_limpio}"
+        tipo_activo = "CEDEAR"
+    elif pais == 'Argentina':
+        simbolo_tradingview = f"BCBA:{simbolo_limpio}"
+        tipo_activo = "Acción Argentina"
+    else:
+        simbolo_tradingview = simbolo_limpio
+        tipo_activo = "Acción Internacional"
+    
+    # Mostrar información del activo seleccionado
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.info(f"📊 **Símbolo**: {simbolo_limpio}")
+    with col2:
+        st.info(f"🌍 **País**: {pais}")
+    with col3:
+        st.info(f"🏛️ **Mercado**: {mercado}")
+    with col4:
+        st.info(f"📈 **Tipo**: {tipo_activo}")
+    
     if simbolo_seleccionado:
-        st.info(f"Mostrando gráfico para: {simbolo_seleccionado}")
+        st.info(f"Mostrando gráfico para: {simbolo_seleccionado} ({simbolo_tradingview})")
         
         # Widget de TradingView
         tv_widget = f"""
-        <div id="tradingview_{simbolo_seleccionado}" style="height:650px"></div>
+        <div id="tradingview_{simbolo_limpio}" style="height:650px"></div>
         <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
         <script type="text/javascript">
         new TradingView.widget({{
-          "container_id": "tradingview_{simbolo_seleccionado}",
+          "container_id": "tradingview_{simbolo_limpio}",
           "width": "100%",
           "height": 650,
-          "symbol": "{simbolo_seleccionado}",
+          "symbol": "{simbolo_tradingview}",
           "interval": "D",
           "timezone": "America/Argentina/Buenos_Aires",
           "theme": "light",
