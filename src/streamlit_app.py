@@ -4074,38 +4074,56 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     }
 
 # --- Funciones de Visualización ---
-def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
+def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_cliente=None):
     st.markdown("### 📈 Resumen del Portafolio")
     
-    # Obtener datos del perfil del cliente
-    datos_perfil = obtener_datos_perfil(token_portador)
-    if datos_perfil:
-        st.markdown("#### 👤 Perfil del Cliente")
+    # Mostrar información del cliente seleccionado
+    if id_cliente:
+        st.markdown("#### 👤 Información del Cliente")
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("Nombre", f"{datos_perfil.get('nombre', 'N/A')} {datos_perfil.get('apellido', 'N/A')}")
-        with col2:
-            st.metric("DNI", datos_perfil.get('dni', 'N/A'))
-        with col3:
-            st.metric("CUIL/CUIT", datos_perfil.get('cuitCuil', 'N/A'))
-        with col4:
-            perfil_inversor = datos_perfil.get('perfilInversor', 'N/A')
-            color_perfil = {
-                'Conservador': '🟢',
-                'Moderado': '🟡', 
-                'Agresivo': '🔴',
-                'N/A': '⚪'
-            }.get(perfil_inversor, '⚪')
-            st.metric("Perfil Inversor", f"{color_perfil} {perfil_inversor}")
+            # Obtener información del cliente desde session_state
+            cliente_info = st.session_state.get('cliente_seleccionado', {})
+            nombre_completo = cliente_info.get('apellidoYNombre', cliente_info.get('nombre', 'Cliente'))
+            st.metric("Cliente", nombre_completo)
         
-        # Información adicional del perfil
+        with col2:
+            numero_cliente = cliente_info.get('numeroCliente', cliente_info.get('id', 'N/A'))
+            st.metric("ID Cliente", numero_cliente)
+        
+        with col3:
+            st.metric("Portafolio", portfolio_id.upper() if portfolio_id else "General")
+        
+        with col4:
+            # Intentar obtener perfil inversor del asesor como referencia
+            datos_perfil_asesor = obtener_datos_perfil(token_portador)
+            if datos_perfil_asesor:
+                perfil_inversor = datos_perfil_asesor.get('perfilInversor', 'N/A')
+                color_perfil = {
+                    'Conservador': '🟢',
+                    'Moderado': '🟡', 
+                    'Agresivo': '🔴',
+                    'N/A': '⚪'
+                }.get(perfil_inversor, '⚪')
+                st.metric("Perfil Asesor", f"{color_perfil} {perfil_inversor}")
+            else:
+                st.metric("Perfil Asesor", "⚪ N/A")
+        
+        # Información adicional
         col5, col6 = st.columns(2)
         with col5:
-            st.info(f"📧 Email: {datos_perfil.get('email', 'N/A')}")
+            if datos_perfil_asesor:
+                st.info(f"📧 Asesor: {datos_perfil_asesor.get('email', 'N/A')}")
+            else:
+                st.info("📧 Asesor: No disponible")
+        
         with col6:
-            cuenta_abierta = "✅ Abierta" if datos_perfil.get('cuentaAbierta', False) else "❌ Cerrada"
-            st.info(f"🏦 Cuenta: {cuenta_abierta}")
+            if datos_perfil_asesor:
+                cuenta_abierta = "✅ Abierta" if datos_perfil_asesor.get('cuentaAbierta', False) else "❌ Cerrada"
+                st.info(f"🏦 Cuenta Asesor: {cuenta_abierta}")
+            else:
+                st.info("🏦 Cuenta Asesor: No disponible")
         
         st.markdown("---")
     
@@ -7857,14 +7875,14 @@ def mostrar_analisis_portafolio():
     with tab1:
         if portafolio_ar:
             st.subheader("🇦🇷 Portafolio Argentina")
-            mostrar_resumen_portafolio(portafolio_ar, token_acceso, "ar")
+            mostrar_resumen_portafolio(portafolio_ar, token_acceso, "ar", id_cliente)
         else:
             st.warning("No se pudo obtener el portafolio de Argentina")
     
     with tab2:
         if portafolio_eeuu:
             st.subheader("🇺🇸 Portafolio Estados Unidos")
-            mostrar_resumen_portafolio(portafolio_eeuu, token_acceso, "eeuu")
+            mostrar_resumen_portafolio(portafolio_eeuu, token_acceso, "eeuu", id_cliente)
         else:
             st.warning("No se pudo obtener el portafolio de EEUU")
     
