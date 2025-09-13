@@ -4452,7 +4452,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
                     "Tipo de Gráfico:",
                     ["Histograma", "Box Plot", "Violin Plot", "Density Plot"],
                     help="Seleccione el tipo de visualización para los valores de activos",
-                    key="tipo_grafico_distribuciones_analisis"
+                    key=f"tipo_grafico_distribuciones_{portfolio_id}"
                 )
                 
                 valores = [a['Valuación'] for a in datos_activos if a['Valuación'] > 0]
