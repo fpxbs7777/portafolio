@@ -664,23 +664,24 @@ def obtener_movimientos_asesor(token_portador, clientes=None, fecha_desde=None, 
     headers = obtener_encabezado_autorizacion(token_portador)
     headers['Content-Type'] = 'application/json'
     
+    # Estructura de datos según la documentación de IOL
     data = {}
     if clientes:
         data['clientes'] = clientes
     if fecha_desde:
-        data['from'] = fecha_desde
+        data['fechaDesde'] = fecha_desde  # Cambiado de 'from' a 'fechaDesde'
     if fecha_hasta:
-        data['to'] = fecha_hasta
+        data['fechaHasta'] = fecha_hasta  # Cambiado de 'to' a 'fechaHasta'
     if tipo_fecha:
-        data['dateType'] = tipo_fecha
+        data['tipoFecha'] = tipo_fecha  # Cambiado de 'dateType' a 'tipoFecha'
     if estado:
-        data['status'] = estado
+        data['estado'] = estado  # Cambiado de 'status' a 'estado'
     if tipo:
-        data['type'] = tipo
+        data['tipo'] = tipo
     if pais:
-        data['country'] = pais
+        data['pais'] = pais  # Cambiado de 'country' a 'pais'
     if moneda:
-        data['currency'] = moneda
+        data['moneda'] = moneda  # Cambiado de 'currency' a 'moneda'
     if cuenta_comitente:
         data['cuentaComitente'] = cuenta_comitente
     
@@ -2633,7 +2634,7 @@ def mostrar_analisis_portafolio():
         if st.button("🔍 Analizar Operaciones Reales", type="primary"):
             if id_cliente:
                 with st.spinner("Obteniendo operaciones..."):
-                    # Obtener operaciones usando la función específica para asesores
+                    # Intentar obtener operaciones usando el endpoint específico de asesor
                     operaciones = obtener_movimientos_asesor(
                         token_acceso,
                         clientes=[id_cliente],  # Lista de clientes
@@ -2642,6 +2643,45 @@ def mostrar_analisis_portafolio():
                         tipo_fecha="fechaOrden",  # Tipo de fecha a filtrar
                         estado="terminada"  # Solo operaciones terminadas
                     )
+                    
+                    # Si el endpoint de asesor falla, usar el método alternativo
+                    if not operaciones:
+                        st.warning("⚠️ Endpoint de asesor no disponible, usando método alternativo...")
+                        
+                        # Obtener operaciones de Argentina
+                        operaciones_ar = obtener_operaciones_filtradas(
+                            token_acceso,
+                            fecha_desde=fecha_desde.isoformat(),
+                            fecha_hasta=fecha_hasta.isoformat(),
+                            pais="argentina"
+                        )
+                        
+                        # Obtener operaciones de Estados Unidos
+                        operaciones_eeuu = obtener_operaciones_filtradas(
+                            token_acceso,
+                            fecha_desde=fecha_desde.isoformat(),
+                            fecha_hasta=fecha_hasta.isoformat(),
+                            pais="estados_Unidos"
+                        )
+                        
+                        # Combinar operaciones
+                        operaciones_todas = (operaciones_ar or []) + (operaciones_eeuu or [])
+                        
+                        # Filtrar operaciones por cliente específico
+                        operaciones = []
+                        for op in operaciones_todas:
+                            # Verificar si la operación pertenece al cliente
+                            if (op.get('cuentaComitente') == id_cliente or 
+                                op.get('numeroCliente') == id_cliente or
+                                op.get('cliente') == id_cliente):
+                                operaciones.append(op)
+                        
+                        # Si no encontramos operaciones específicas, mostrar todas para debug
+                        if not operaciones and operaciones_todas:
+                            st.warning(f"⚠️ No se encontraron operaciones específicas del cliente {id_cliente}")
+                            st.info("🔍 Mostrando todas las operaciones para análisis de campos disponibles:")
+                            st.json(operaciones_todas[:3])  # Mostrar primeras 3 para debug
+                            operaciones = operaciones_todas  # Usar todas temporalmente
                     
                 if operaciones:
                     st.success(f"✅ Se obtuvieron {len(operaciones)} operaciones del cliente {id_cliente}")
