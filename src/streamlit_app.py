@@ -5,7 +5,7 @@ import pandas as pd
 from plotly.subplots import make_subplots
 from datetime import date, timedelta, datetime
 import numpy as np
-import yfinance as yf
+# import yfinance as yf  # Removido - usando solo API de IOL
 import scipy.optimize as op
 from scipy import stats
 from scipy import optimize
@@ -1155,39 +1155,7 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         # Error general - silencioso para no interrumpir el análisis
         return None
 
-def obtener_datos_alternativos_yfinance(simbolo, fecha_desde, fecha_hasta):
-    """
-    Fallback usando yfinance para símbolos que no estén disponibles en IOL
-    """
-    try:
-        # Mapear símbolos argentinos a Yahoo Finance si es posible
-        simbolo_yf = simbolo
-        
-        # Agregar sufijos comunes para acciones argentinas
-        sufijos_ar = ['.BA', '.AR']
-        
-        for sufijo in sufijos_ar:
-            try:
-                ticker = yf.Ticker(simbolo + sufijo)
-                data = ticker.history(start=fecha_desde, end=fecha_hasta)
-                if not data.empty and len(data) > 10:
-                    # Usar precio de cierre
-                    return data['Close']
-            except Exception:
-                continue
-        
-        # Intentar sin sufijo
-        try:
-            ticker = yf.Ticker(simbolo)
-            data = ticker.history(start=fecha_desde, end=fecha_hasta)
-            if not data.empty and len(data) > 10:
-                return data['Close']
-        except Exception:
-            pass
-            
-        return None
-    except Exception:
-        return None
+# Función removida - usando solo API de IOL
 
 def obtener_operaciones_activo(token_portador, simbolo, fecha_desde=None, fecha_hasta=None, id_cliente=None):
     """
@@ -1487,6 +1455,150 @@ def obtener_datos_paralelo(simbolo, token_portador, fecha_desde_str, fecha_hasta
     except Exception:
         return simbolo, None, None
 
+def obtener_tokens_directo(username, password):
+    """
+    Obtiene tokens de acceso usando el método directo proporcionado por el usuario
+    """
+    token_url = 'https://api.invertironline.com/token'
+    payload = {
+        'username': username,
+        'password': password,
+        'grant_type': 'password'
+    }
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
+    try:
+        response = requests.post(token_url, data=payload, headers=headers, timeout=15)
+        if response.status_code == 200:
+            tokens = response.json()
+            return tokens['access_token'], tokens['refresh_token']
+        else:
+            return None, None
+    except Exception as e:
+        return None, None
+
+def refrescar_token_directo(refresh_token):
+    """
+    Refresca el token de acceso usando el método directo
+    """
+    token_url = 'https://api.invertironline.com/token'
+    payload = {
+        'refresh_token': refresh_token,
+        'grant_type': 'refresh_token'
+    }
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
+    try:
+        response = requests.post(token_url, data=payload, headers=headers, timeout=15)
+        if response.status_code == 200:
+            tokens = response.json()
+            return tokens['access_token'], tokens['refresh_token']
+        else:
+            return None, None
+    except Exception as e:
+        return None, None
+
+def obtener_encabezado_autorizacion(token_portador):
+    """
+    Obtiene el encabezado de autorización para las llamadas a la API
+    """
+    return {
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'application/json'
+    }
+
+@st.cache_data(ttl=1800)  # Cache por 30 minutos
+def obtener_tickers_por_panel(token_portador, paneles, pais):
+    """
+    Obtiene tickers disponibles por panel de cotizaciones
+    """
+    tickers_por_panel = {}
+    tickers_df = pd.DataFrame(columns=['panel', 'simbolo'])
+    
+    for panel in paneles:
+        url = f'https://api.invertironline.com/api/v2/cotizaciones-orleans/{panel}/{pais}/Operables'
+        params = {
+            'cotizacionInstrumentoModel.instrumento': panel,
+            'cotizacionInstrumentoModel.pais': pais.lower()
+        }
+        encabezados = obtener_encabezado_autorizacion(token_portador)
+        try:
+            respuesta = requests.get(url, headers=encabezados, params=params, timeout=15)
+            if respuesta.status_code == 200:
+                datos = respuesta.json()
+                tickers = [titulo['simbolo'] for titulo in datos.get('titulos', [])]
+                tickers_por_panel[panel] = tickers
+                panel_df = pd.DataFrame({'panel': panel, 'simbolo': tickers})
+                tickers_df = pd.concat([tickers_df, panel_df], ignore_index=True)
+            else:
+                continue
+        except Exception as e:
+            continue
+    return tickers_por_panel, tickers_df
+
+def calcular_rsi(series, period=14):
+    """
+    Calcula el RSI de una serie de precios
+    """
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+def calcular_rvi(series, period=14):
+    """
+    Calcula el Relative Volatility Index (RVI) de una serie de precios.
+    El RVI es similar al RSI pero usa la desviación estándar de los cambios de precio.
+    """
+    delta = series.diff()
+    std = delta.rolling(window=period).std()
+    up = std.where(delta > 0, 0)
+    down = std.where(delta < 0, 0).abs()
+    up_mean = up.rolling(window=period).mean()
+    down_mean = down.rolling(window=period).mean()
+    rvi = 100 * up_mean / (up_mean + down_mean)
+    return rvi
+
+def calcular_indicadores_tecnicos_avanzados(precios, periodo=14):
+    """
+    Calcula indicadores técnicos avanzados para una serie de precios
+    """
+    indicadores = {}
+    
+    # RSI
+    indicadores['RSI'] = calcular_rsi(precios, periodo)
+    
+    # RVI
+    indicadores['RVI'] = calcular_rvi(precios, periodo)
+    
+    # Media móvil simple
+    indicadores['SMA_20'] = precios.rolling(window=20).mean()
+    indicadores['SMA_50'] = precios.rolling(window=50).mean()
+    
+    # Media móvil exponencial
+    indicadores['EMA_12'] = precios.ewm(span=12).mean()
+    indicadores['EMA_26'] = precios.ewm(span=26).mean()
+    
+    # MACD
+    indicadores['MACD'] = indicadores['EMA_12'] - indicadores['EMA_26']
+    indicadores['MACD_Signal'] = indicadores['MACD'].ewm(span=9).mean()
+    indicadores['MACD_Histogram'] = indicadores['MACD'] - indicadores['MACD_Signal']
+    
+    # Bollinger Bands
+    sma_20 = indicadores['SMA_20']
+    std_20 = precios.rolling(window=20).std()
+    indicadores['BB_Upper'] = sma_20 + (std_20 * 2)
+    indicadores['BB_Lower'] = sma_20 - (std_20 * 2)
+    
+    # Volatilidad
+    indicadores['Volatilidad'] = precios.pct_change().rolling(window=20).std() * np.sqrt(252)
+    
+    return indicadores
+
 @st.cache_data(ttl=600)  # Cache por 10 minutos
 def obtener_serie_historica_directa(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
     """
@@ -1535,20 +1647,21 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
             'EDN': 'bCBA', 'ALUA': 'bCBA', 'COME': 'bCBA', 'LOMA': 'bCBA', 'MIRG': 'bCBA',
             'PGR': 'bCBA', 'SUPV': 'bCBA', 'TECO2': 'bCBA', 'TGNO4': 'bCBA', 'TGSU2': 'bCBA',
             'TRAN': 'bCBA', 'TS': 'bCBA', 'VALO': 'bCBA', 'BMA': 'bCBA', 'CEPU': 'bCBA',
-            'IRCP': 'bCBA', 'PAM': 'bCBA', 'PZE': 'bCBA', 'TGS': 'bCBA',
+            'IRCP': 'bCBA', 'PAM': 'bCBA', 'PZE': 'bCBA', 'TGS': 'bCBA', 'TXAR': 'bCBA',
+            'HARG': 'bCBA', 'LONG': 'bCBA', 'MORI': 'bCBA', 'OEST': 'bCBA', 'RICH': 'bCBA',
+            'SAMI': 'bCBA', 'SEMI': 'bCBA', 'TXAR': 'bCBA', 'VIST': 'bCBA', 'WILD': 'bCBA',
             # Bonos argentinos - bCBA
-            'GD30': 'bCBA', 'GD35': 'bCBA', 'GD38': 'bCBA', 'GD41': 'bCBA', 'GD46': 'bCBA',
-            'GD47': 'bCBA', 'GD48': 'bCBA', 'GD49': 'bCBA', 'GD50': 'bCBA', 'GD51': 'bCBA',
-            'GD52': 'bCBA', 'GD53': 'bCBA', 'GD54': 'bCBA', 'GD55': 'bCBA', 'GD56': 'bCBA',
-            'GD57': 'bCBA', 'GD58': 'bCBA', 'GD59': 'bCBA',
-            # ETFs y acciones internacionales - nYSE/nASDAQ
-            'SPY': 'nYSE', 'QQQ': 'nASDAQ', 'IWM': 'nYSE', 'EFA': 'nYSE', 'EEM': 'nYSE',
-            'AGG': 'nYSE', 'TLT': 'nYSE', 'GLD': 'nYSE', 'SLV': 'nYSE', 'USO': 'nYSE',
-            'AAPL': 'nASDAQ', 'MSFT': 'nASDAQ', 'GOOGL': 'nASDAQ', 'AMZN': 'nASDAQ',
-            'TSLA': 'nASDAQ', 'META': 'nASDAQ', 'NVDA': 'nASDAQ', 'NFLX': 'nASDAQ',
-            'AMD': 'nASDAQ', 'INTC': 'nASDAQ', 'ORCL': 'nYSE', 'CRM': 'nYSE',
-            'ADBE': 'nASDAQ', 'PYPL': 'nASDAQ', 'UBER': 'nYSE', 'LYFT': 'nASDAQ',
-            'SNAP': 'nYSE', 'TWTR': 'nYSE'
+            'AL30': 'bCBA', 'AL30D': 'bCBA', 'GD30': 'bCBA', 'GD35': 'bCBA', 'GD38': 'bCBA', 
+            'GD41': 'bCBA', 'GD46': 'bCBA', 'GD47': 'bCBA', 'GD48': 'bCBA', 'GD49': 'bCBA', 
+            'GD50': 'bCBA', 'GD51': 'bCBA', 'GD52': 'bCBA', 'GD53': 'bCBA', 'GD54': 'bCBA', 
+            'GD55': 'bCBA', 'GD56': 'bCBA', 'GD57': 'bCBA', 'GD58': 'bCBA', 'GD59': 'bCBA',
+            # CEDEARs - bCBA
+            'AAPL': 'bCBA', 'MSFT': 'bCBA', 'GOOGL': 'bCBA', 'AMZN': 'bCBA', 'TSLA': 'bCBA',
+            'META': 'bCBA', 'NVDA': 'bCBA', 'NFLX': 'bCBA', 'AMD': 'bCBA', 'INTC': 'bCBA',
+            'ORCL': 'bCBA', 'CRM': 'bCBA', 'ADBE': 'bCBA', 'PYPL': 'bCBA', 'UBER': 'bCBA',
+            'LYFT': 'bCBA', 'SNAP': 'bCBA', 'TWTR': 'bCBA', 'SPY': 'bCBA', 'QQQ': 'bCBA',
+            'IWM': 'bCBA', 'EFA': 'bCBA', 'EEM': 'bCBA', 'AGG': 'bCBA', 'TLT': 'bCBA',
+            'GLD': 'bCBA', 'SLV': 'bCBA', 'USO': 'bCBA'
         }
         
         # Crear barra de progreso
@@ -3030,11 +3143,13 @@ def dataframe_correlacion_beta(benchmark, position_security, hedge_universe, tok
             if mean_returns is not None and cov_matrix is not None:
                 returns = df_precios.pct_change().dropna()
             else:
-                # Fallback a yfinance
-                returns = _get_returns_yfinance(all_securities)
+                # No hay fallback - solo usar IOL
+                st.error("No se pudieron obtener datos históricos de IOL")
+                return pd.DataFrame()
         else:
-            # Usar yfinance como fallback
-            returns = _get_returns_yfinance(all_securities)
+            # No hay fallback - solo usar IOL
+            st.error("No se pudieron obtener datos históricos de IOL")
+            return pd.DataFrame()
         
         if returns is None or returns.empty:
             st.error("No se pudieron obtener datos históricos")
@@ -3081,27 +3196,7 @@ def dataframe_correlacion_beta(benchmark, position_security, hedge_universe, tok
         st.error(f"Error calculando correlaciones y betas: {str(e)}")
         return pd.DataFrame()
 
-def _get_returns_yfinance(securities):
-    """
-    Obtiene retornos usando yfinance como fallback
-    """
-    try:
-        returns_data = {}
-        for security in securities:
-            try:
-                ticker = yf.Ticker(security)
-                data = ticker.history(period="1y")
-                if not data.empty:
-                    returns_data[security] = data['Close'].pct_change().dropna()
-            except Exception:
-                continue
-        
-        if returns_data:
-            return pd.DataFrame(returns_data)
-        else:
-            return None
-    except Exception:
-        return None
+# Función removida - usando solo API de IOL
 
 class Coberturista:
     """
@@ -3132,7 +3227,7 @@ class Coberturista:
     
     def cargar_datos_historicos(self):
         """
-        Carga datos históricos usando IOL o yfinance
+        Carga datos históricos usando solo IOL
         """
         try:
             all_securities = [self.benchmark, self.position_security] + self.hedge_securities
@@ -3150,13 +3245,7 @@ class Coberturista:
                     self.cov_matrix = cov_matrix
                     return True
             
-            # Fallback a yfinance
-            self.returns = _get_returns_yfinance(all_securities)
-            if self.returns is not None and not self.returns.empty:
-                self.mean_returns = self.returns.mean() * 252
-                self.cov_matrix = self.returns.cov() * 252
-                return True
-            
+            # No hay fallback - solo usar IOL
             return False
             
         except Exception as e:
@@ -3666,17 +3755,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             except Exception as e:
                 print(f"Error al obtener datos históricos de IOL para {simbolo}: {str(e)}")
             
-            # Si IOL falló, intentar con yfinance como fallback
-            if serie_historica is None or serie_historica.empty:
-                try:
-                    print(f"Intentando yfinance como fallback para {simbolo}")
-                    serie_historica = obtener_datos_alternativos_yfinance(
-                        simbolo, fecha_desde, fecha_hasta
-                    )
-                    if serie_historica is not None and not serie_historica.empty:
-                        print(f"✅ Datos obtenidos de yfinance para {simbolo}: {len(serie_historica)} puntos")
-                except Exception as e:
-                    print(f"Error al obtener datos de yfinance para {simbolo}: {str(e)}")
+            # No hay fallback - solo usar IOL
             
             if serie_historica is None:
                 print(f"No se obtuvieron datos para {simbolo} (None)")
