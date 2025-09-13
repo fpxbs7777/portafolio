@@ -4758,80 +4758,59 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
     else:
         st.warning("No se encontraron activos en el portafolio")
 
-def mostrar_estado_cuenta(estado_cuenta, es_eeuu=False):
+def mostrar_estado_cuenta(estado_cuenta):
     """
-    Muestra el estado de cuenta, con soporte para cuentas filtradas de EEUU
+    Muestra el estado de cuenta de Argentina
     
     Args:
         estado_cuenta (dict): Datos del estado de cuenta
-        es_eeuu (bool): Si es True, muestra información específica para cuentas de EEUU
     """
-    if es_eeuu:
-        st.markdown("### 🇺🇸 Estado de Cuenta EEUU")
-    else:
-        st.markdown("### 💰 Estado de Cuenta")
+    st.markdown("### 💰 Estado de Cuenta")
     
     if not estado_cuenta:
         st.warning("No hay datos de estado de cuenta disponibles")
         return
     
-    # Verificar si es un estado de cuenta filtrado de EEUU
-    if estado_cuenta.get('filtrado', False):
-        total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
-        cuentas = estado_cuenta.get('cuentas', [])
-        total_cuentas_eeuu = estado_cuenta.get('total_cuentas_eeuu', 0)
+    # Estado de cuenta general
+    total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
+    cuentas = estado_cuenta.get('cuentas', [])
+    
+    # Contar cuentas únicas por número y tipo
+    cuentas_unicas = {}
+    for cuenta in cuentas:
+        numero = cuenta.get('numero', 'N/A')
+        tipo = cuenta.get('tipo', 'N/A')
+        moneda = cuenta.get('moneda', 'N/A')
+        clave_unica = f"{numero}_{tipo}_{moneda}"
+        cuentas_unicas[clave_unica] = cuenta
+    
+    numero_cuentas_unicas = len(cuentas_unicas)
+    
+    cols = st.columns(3)
+    cols[0].metric("Total en Pesos", f"AR$ {total_en_pesos:,.2f}")
+    cols[1].metric("Número de Cuentas", numero_cuentas_unicas)
+    cols[2].metric("Total de Registros", len(cuentas))
+    
+    if cuentas:
+        st.subheader("📊 Detalle de Cuentas")
         
-        cols = st.columns(3)
-        cols[0].metric("Total EEUU en Pesos", f"AR$ {total_en_pesos:,.2f}")
-        cols[1].metric("Cuentas de EEUU", total_cuentas_eeuu)
-        cols[2].metric("Total General", f"AR$ {total_en_pesos:,.2f}")
+        datos_cuentas = []
+        for cuenta in cuentas:
+            datos_cuentas.append({
+                'Número': cuenta.get('numero', 'N/A'),
+                'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
+                'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
+                'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
+                'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
+                'Total': f"${cuenta.get('total', 0):,.2f}",
+            })
         
-        if cuentas:
-            st.subheader("📊 Detalle de Cuentas de EEUU")
-            
-            datos_cuentas = []
-            for cuenta in cuentas:
-                datos_cuentas.append({
-                    'Número': cuenta.get('numero', 'N/A'),
-                    'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
-                    'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
-                    'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
-                    'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
-                    'Total': f"${cuenta.get('total', 0):,.2f}",
-                })
-            
-            df_cuentas = pd.DataFrame(datos_cuentas)
-            st.dataframe(df_cuentas, use_container_width=True, height=300)
-            
-            # Mostrar resumen específico para EEUU
-            st.info(f"💡 **Resumen EEUU**: {total_cuentas_eeuu} cuentas con saldo total de AR$ {total_en_pesos:,.2f}")
-        else:
-            st.info("ℹ️ No se encontraron cuentas específicas de EEUU")
-    else:
-        # Estado de cuenta general (no filtrado)
-        total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
-        cuentas = estado_cuenta.get('cuentas', [])
+        df_cuentas = pd.DataFrame(datos_cuentas)
+        st.dataframe(df_cuentas, use_container_width=True, height=300)
         
-        cols = st.columns(3)
-        cols[0].metric("Total en Pesos", f"AR$ {total_en_pesos:,.2f}")
-        cols[1].metric("Número de Cuentas", len(cuentas))
-        
-        if cuentas:
-            st.subheader("📊 Detalle de Cuentas")
-            
-            datos_cuentas = []
-            for cuenta in cuentas:
-                datos_cuentas.append({
-                    'Número': cuenta.get('numero', 'N/A'),
-                    'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
-                    'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
-                    'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
-                    'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
-                    'Total': f"${cuenta.get('total', 0):,.2f}",
-                })
-            
-            df_cuentas = pd.DataFrame(datos_cuentas)
-            st.dataframe(df_cuentas, use_container_width=True, height=300)
+        # Mostrar resumen
+        if numero_cuentas_unicas != len(cuentas):
+            st.info(f"ℹ️ **Nota**: Se muestran {len(cuentas)} registros de {numero_cuentas_unicas} cuentas únicas")
 
 def obtener_parametros_operatoria_mep(token_acceso):
     """
@@ -9508,20 +9487,11 @@ def mostrar_analisis_portafolio():
     
     with tab3:
         # Estado de cuenta consolidado
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("🇦🇷 Estado de Cuenta Argentina")
-            if estado_cuenta_ar:
-                mostrar_estado_cuenta(estado_cuenta_ar, es_eeuu=False)
-            else:
-                st.warning("No se pudo obtener el estado de cuenta de Argentina")
-        
-        with col2:
-            st.subheader("🇺🇸 Estado de Cuenta EEUU")
-            if estado_cuenta_eeuu:
-                mostrar_estado_cuenta(estado_cuenta_eeuu, es_eeuu=True)
-            else:
-                st.warning("No se pudo obtener el estado de cuenta de EEUU")
+        st.subheader("🇦🇷 Estado de Cuenta Argentina")
+        if estado_cuenta_ar:
+            mostrar_estado_cuenta(estado_cuenta_ar)
+        else:
+            st.warning("No se pudo obtener el estado de cuenta de Argentina")
         
         # Vista consolidada de todas las cuentas
         st.subheader("🔍 Vista Consolidada de Todas las Cuentas")
@@ -9530,15 +9500,21 @@ def mostrar_analisis_portafolio():
             if cuentas_totales:
                 # Crear DataFrame con clasificación por país
                 datos_consolidados = []
+                descripciones_validas = False
+                
                 for cuenta in cuentas_totales:
                     numero = cuenta.get('numero', 'N/A')
                     descripcion = cuenta.get('descripcion', 'N/A')
                     moneda = cuenta.get('moneda', 'N/A')
                     
+                    # Verificar si hay descripciones válidas
+                    if descripcion and descripcion != 'N/A' and descripcion.strip():
+                        descripciones_validas = True
+                    
                     # Determinar si es cuenta de EEUU
                     es_cuenta_eeuu = any([
-                        'eeuu' in descripcion.lower(),
-                        'estados unidos' in descripcion.lower(),
+                        'eeuu' in descripcion.lower() if descripcion != 'N/A' else False,
+                        'estados unidos' in descripcion.lower() if descripcion != 'N/A' else False,
                         '-eeuu' in str(numero).lower(),
                         'dolar estadounidense' in moneda.lower(),
                         'dolar_estadounidense' in moneda.lower(),
@@ -9547,15 +9523,21 @@ def mostrar_analisis_portafolio():
                     
                     pais = "🇺🇸 EEUU" if es_cuenta_eeuu else "🇦🇷 Argentina"
                     
-                    datos_consolidados.append({
+                    # Crear diccionario base
+                    cuenta_data = {
                         'País': pais,
                         'Número': numero,
-                        'Descripción': descripcion,
                         'Moneda': moneda.replace('_', ' ').title(),
                         'Disponible': cuenta.get('disponible', 0),
                         'Saldo': cuenta.get('saldo', 0),
                         'Total': cuenta.get('total', 0),
-                    })
+                    }
+                    
+                    # Solo agregar descripción si hay descripciones válidas
+                    if descripciones_validas:
+                        cuenta_data['Descripción'] = descripcion
+                    
+                    datos_consolidados.append(cuenta_data)
                 
                 df_consolidado = pd.DataFrame(datos_consolidados)
                 
