@@ -9964,11 +9964,11 @@ def mostrar_analisis_portafolio():
     
     with tab3:
         # Estado de cuenta consolidado
-            st.subheader("🇦🇷 Estado de Cuenta Argentina")
-            if estado_cuenta_ar:
+        st.subheader("🇦🇷 Estado de Cuenta Argentina")
+        if estado_cuenta_ar:
             mostrar_estado_cuenta(estado_cuenta_ar)
-            else:
-                st.warning("No se pudo obtener el estado de cuenta de Argentina")
+        else:
+            st.warning("No se pudo obtener el estado de cuenta de Argentina")
         
         # Vista consolidada de todas las cuentas
         st.subheader("🔍 Vista Consolidada de Todas las Cuentas")
