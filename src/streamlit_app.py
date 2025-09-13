@@ -4079,14 +4079,15 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
     
     # Mostrar información del cliente seleccionado
     if id_cliente:
-        st.markdown("#### 👤 Información del Cliente")
+        st.markdown("#### 👤 Perfil del Cliente")
+        cliente_info = st.session_state.get('cliente_seleccionado', {})
+        
+        # Mostrar información básica en métricas
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            # Obtener información del cliente desde session_state
-            cliente_info = st.session_state.get('cliente_seleccionado', {})
             nombre_completo = cliente_info.get('apellidoYNombre', cliente_info.get('nombre', 'Cliente'))
-            st.metric("Cliente", nombre_completo)
+            st.metric("Nombre", nombre_completo)
         
         with col2:
             numero_cliente = cliente_info.get('numeroCliente', cliente_info.get('id', 'N/A'))
@@ -4096,34 +4097,38 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
             st.metric("Portafolio", portfolio_id.upper() if portfolio_id else "General")
         
         with col4:
-            # Intentar obtener perfil inversor del asesor como referencia
-            datos_perfil_asesor = obtener_datos_perfil(token_portador)
-            if datos_perfil_asesor:
-                perfil_inversor = datos_perfil_asesor.get('perfilInversor', 'N/A')
-                color_perfil = {
-                    'Conservador': '🟢',
-                    'Moderado': '🟡', 
-                    'Agresivo': '🔴',
-                    'N/A': '⚪'
-                }.get(perfil_inversor, '⚪')
-                st.metric("Perfil Asesor", f"{color_perfil} {perfil_inversor}")
-            else:
-                st.metric("Perfil Asesor", "⚪ N/A")
+            # Mostrar estado del cliente si está disponible
+            estado = cliente_info.get('estado', 'Activo')
+            st.metric("Estado", estado)
         
-        # Información adicional
-        col5, col6 = st.columns(2)
-        with col5:
-            if datos_perfil_asesor:
-                st.info(f"📧 Asesor: {datos_perfil_asesor.get('email', 'N/A')}")
-            else:
-                st.info("📧 Asesor: No disponible")
+        # Mostrar información adicional disponible
+        info_adicional = []
+        if cliente_info.get('email'):
+            info_adicional.append(f"📧 Email: {cliente_info.get('email')}")
+        if cliente_info.get('telefono'):
+            info_adicional.append(f"📞 Teléfono: {cliente_info.get('telefono')}")
+        if cliente_info.get('direccion'):
+            info_adicional.append(f"🏠 Dirección: {cliente_info.get('direccion')}")
+        if cliente_info.get('fechaAlta'):
+            info_adicional.append(f"📅 Fecha Alta: {cliente_info.get('fechaAlta')}")
+        if cliente_info.get('perfilInversor'):
+            info_adicional.append(f"🎯 Perfil: {cliente_info.get('perfilInversor')}")
         
-        with col6:
-            if datos_perfil_asesor:
-                cuenta_abierta = "✅ Abierta" if datos_perfil_asesor.get('cuentaAbierta', False) else "❌ Cerrada"
-                st.info(f"🏦 Cuenta Asesor: {cuenta_abierta}")
-            else:
-                st.info("🏦 Cuenta Asesor: No disponible")
+        if info_adicional:
+            col_info1, col_info2 = st.columns(2)
+            mitad = len(info_adicional) // 2 + len(info_adicional) % 2
+            
+            with col_info1:
+                for info in info_adicional[:mitad]:
+                    st.info(info)
+            
+            with col_info2:
+                for info in info_adicional[mitad:]:
+                    st.info(info)
+        
+        # Debug: Mostrar todos los campos disponibles (solo en desarrollo)
+        with st.expander("🔍 Información completa del cliente (Debug)"):
+            st.json(cliente_info)
         
         st.markdown("---")
     
