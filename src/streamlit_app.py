@@ -4602,61 +4602,14 @@ def mostrar_estado_cuenta(estado_cuenta, es_eeuu=False):
     else:
         st.markdown("### 💰 Estado de Cuenta")
     
-    if not estado_cuenta:
-        st.warning("No hay datos de estado de cuenta disponibles")
-        return
-
-def mostrar_analisis_portafolio():
-    cliente = st.session_state.cliente_seleccionado
-    token_acceso = st.session_state.token_acceso
-
-    if not cliente:
-        st.error("No se ha seleccionado ningún cliente")
-        return
-
-    id_cliente = cliente.get('numeroCliente', cliente.get('id'))
-    nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
-
-    st.title(f"Análisis de Portafolio - {nombre_cliente}")
+    col1, col2 = st.columns(2)
     
-    # Cargar datos una sola vez y cachearlos
-    @st.cache_data(ttl=300)  # Cache por 5 minutos
-    def cargar_datos_cliente(token, cliente_id):
-        """Carga y cachea los datos del cliente para evitar llamadas repetitivas"""
-        portafolio_ar = obtener_portafolio(token, cliente_id, 'Argentina')
-        portafolio_eeuu = obtener_portafolio_eeuu(token, cliente_id)
-        estado_cuenta_ar = obtener_estado_cuenta(token, cliente_id)
-        estado_cuenta_eeuu = obtener_estado_cuenta_eeuu(token)
-        return portafolio_ar, portafolio_eeuu, estado_cuenta_ar, estado_cuenta_eeuu
-    
-    # Cargar datos con cache
-    with st.spinner("🔄 Cargando datos del cliente..."):
-        portafolio_ar, portafolio_eeuu, estado_cuenta_ar, estado_cuenta_eeuu = cargar_datos_cliente(token_acceso, id_cliente)
-    
-    # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "🇦🇷 Portafolio Argentina", 
-        "🇺🇸 Portafolio EEUU",
-        "💰 Estado de Cuenta", 
-        "🎯 Optimización y Cobertura",
-        "📊 Análisis Técnico",
-        "💱 Cotizaciones",
-        "📈 Operaciones Reales"
-    ])
-
-    with tab1:
-        if portafolio_ar:
-            st.subheader("🇦🇷 Portafolio Argentina")
-            mostrar_resumen_portafolio(portafolio_ar, token_acceso, "ar", id_cliente)
-        else:
-            st.warning("No se pudo obtener el portafolio de Argentina")
-    
-    with tab2:
-        if portafolio_eeuu:
-            st.subheader("🇺🇸 Portafolio Estados Unidos")
-            mostrar_resumen_portafolio(portafolio_eeuu, token_acceso, "eeuu", id_cliente)
-        else:
-            st.warning("No se pudo obtener el portafolio de EEUU")
+    with col1:
+        st.markdown("#### 📈 Estadísticas Descriptivas")
+        if len(datos_activos) > 0:
+                    valores = [a['Valuación'] for a in datos_activos if a['Valuación'] > 0]
+                    if valores:
+                        # Cache de cálculos estadísticos
                         @st.cache_data(ttl=300)
                         def calcular_estadisticas(valores_list):
                             """Calcula estadísticas con cache para mejor rendimiento"""
@@ -8438,6 +8391,515 @@ def main():
                 """)
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
+
+# --- Funciones Mejoradas para Estadísticas de Operaciones ---
+
+def calcular_estadisticas_operaciones(operaciones, token_portador):
+    """
+    Calcula estadísticas detalladas de las operaciones del portafolio
+    
+    Args:
+        operaciones (list): Lista de operaciones obtenidas de la API
+        token_portador (str): Token de acceso para la autenticación
+    
+    Returns:
+        dict: Diccionario con estadísticas detalladas
+    """
+    if not operaciones:
+        return None
+    
+    # Convertir a DataFrame
+    df_ops = pd.DataFrame(operaciones)
+    df_ops['fechaOrden'] = pd.to_datetime(df_ops['fechaOrden'], format='mixed')
+    df_ops = df_ops.sort_values('fechaOrden')
+    
+    # Estadísticas básicas
+    total_operaciones = len(df_ops)
+    simbolos_unicos = df_ops['simbolo'].nunique()
+    tipos_operacion = df_ops['tipo'].value_counts().to_dict()
+    
+    # Estadísticas por tipo de operación
+    compras = df_ops[df_ops['tipo'] == 'Compra']
+    ventas = df_ops[df_ops['tipo'] == 'Venta']
+    
+    # Estadísticas financieras
+    monto_total_compras = compras['montoOperado'].sum() if not compras.empty else 0
+    monto_total_ventas = ventas['montoOperado'].sum() if not ventas.empty else 0
+    flujo_neto = monto_total_ventas - monto_total_compras
+    
+    # Estadísticas por símbolo
+    stats_por_simbolo = {}
+    for simbolo in df_ops['simbolo'].unique():
+        ops_simbolo = df_ops[df_ops['simbolo'] == simbolo]
+        compras_simbolo = ops_simbolo[ops_simbolo['tipo'] == 'Compra']
+        ventas_simbolo = ops_simbolo[ops_simbolo['tipo'] == 'Venta']
+        
+        stats_por_simbolo[simbolo] = {
+            'total_operaciones': len(ops_simbolo),
+            'compras': len(compras_simbolo),
+            'ventas': len(ventas_simbolo),
+            'monto_compras': compras_simbolo['montoOperado'].sum() if not compras_simbolo.empty else 0,
+            'monto_ventas': ventas_simbolo['montoOperado'].sum() if not ventas_simbolo.empty else 0,
+            'flujo_neto': (ventas_simbolo['montoOperado'].sum() if not ventas_simbolo.empty else 0) - 
+                         (compras_simbolo['montoOperado'].sum() if not compras_simbolo.empty else 0),
+            'precio_promedio_compra': compras_simbolo['precioOperado'].mean() if not compras_simbolo.empty else 0,
+            'precio_promedio_venta': ventas_simbolo['precioOperado'].mean() if not ventas_simbolo.empty else 0,
+            'cantidad_total_comprada': compras_simbolo['cantidadOperada'].sum() if not compras_simbolo.empty else 0,
+            'cantidad_total_vendida': ventas_simbolo['cantidadOperada'].sum() if not ventas_simbolo.empty else 0,
+            'posicion_actual': (compras_simbolo['cantidadOperada'].sum() if not compras_simbolo.empty else 0) - 
+                              (ventas_simbolo['cantidadOperada'].sum() if not ventas_simbolo.empty else 0)
+        }
+    
+    # Estadísticas temporales
+    df_ops['mes'] = df_ops['fechaOrden'].dt.to_period('M')
+    operaciones_por_mes = df_ops.groupby('mes').size().to_dict()
+    
+    # Calcular métricas de rendimiento por símbolo
+    rendimientos_por_simbolo = {}
+    for simbolo, stats in stats_por_simbolo.items():
+        if stats['precio_promedio_compra'] > 0 and stats['precio_promedio_venta'] > 0:
+            rendimiento_porcentaje = ((stats['precio_promedio_venta'] - stats['precio_promedio_compra']) / 
+                                    stats['precio_promedio_compra']) * 100
+            rendimientos_por_simbolo[simbolo] = rendimiento_porcentaje
+    
+    return {
+        'resumen_general': {
+            'total_operaciones': total_operaciones,
+            'simbolos_unicos': simbolos_unicos,
+            'tipos_operacion': tipos_operacion,
+            'monto_total_compras': monto_total_compras,
+            'monto_total_ventas': monto_total_ventas,
+            'flujo_neto': flujo_neto,
+            'fecha_primera_operacion': df_ops['fechaOrden'].min(),
+            'fecha_ultima_operacion': df_ops['fechaOrden'].max()
+        },
+        'por_simbolo': stats_por_simbolo,
+        'por_mes': operaciones_por_mes,
+        'rendimientos': rendimientos_por_simbolo
+    }
+
+def mostrar_estadisticas_operaciones_mejoradas(estadisticas):
+    """
+    Muestra las estadísticas de operaciones con gráficos mejorados y escalas regulares
+    
+    Args:
+        estadisticas (dict): Estadísticas calculadas por calcular_estadisticas_operaciones
+    """
+    if not estadisticas:
+        st.warning("No hay estadísticas disponibles")
+        return
+    
+    st.markdown("### 📊 Estadísticas Detalladas de Operaciones")
+    
+    # Resumen general con métricas
+    resumen = estadisticas['resumen_general']
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Operaciones", f"{resumen['total_operaciones']:,}")
+    with col2:
+        st.metric("Símbolos Únicos", f"{resumen['simbolos_unicos']:,}")
+    with col3:
+        st.metric("Flujo Neto", f"${resumen['flujo_neto']:,.2f}")
+    with col4:
+        st.metric("Período", f"{(resumen['fecha_ultima_operacion'] - resumen['fecha_primera_operacion']).days} días")
+    
+    # Gráfico de operaciones por mes con escala mejorada
+    st.markdown("#### 📈 Evolución de Operaciones por Mes")
+    if estadisticas['por_mes']:
+        df_mes = pd.DataFrame(list(estadisticas['por_mes'].items()), columns=['Mes', 'Operaciones'])
+        df_mes['Mes'] = pd.to_datetime(df_mes['Mes'].astype(str))
+        df_mes = df_mes.sort_values('Mes')
+        
+        fig_mes = go.Figure()
+        fig_mes.add_trace(go.Scatter(
+            x=df_mes['Mes'],
+            y=df_mes['Operaciones'],
+            mode='lines+markers',
+            name='Operaciones',
+            line=dict(color='#1f77b4', width=3),
+            marker=dict(size=8, color='#1f77b4')
+        ))
+        
+        fig_mes.update_layout(
+            title="Operaciones por Mes",
+            xaxis_title="Mes",
+            yaxis_title="Número de Operaciones",
+            height=400,
+            showlegend=False,
+            xaxis=dict(
+                tickformat='%Y-%m',
+                tickmode='auto',
+                nticks=10
+            ),
+            yaxis=dict(
+                tickmode='linear',
+                tick0=0,
+                dtick=max(1, df_mes['Operaciones'].max() // 10)
+            )
+        )
+        
+        st.plotly_chart(fig_mes, use_container_width=True)
+    
+    # Gráfico de distribución por tipo de operación
+    st.markdown("#### 🥧 Distribución por Tipo de Operación")
+    if resumen['tipos_operacion']:
+        fig_tipos = go.Figure(data=[go.Pie(
+            labels=list(resumen['tipos_operacion'].keys()),
+            values=list(resumen['tipos_operacion'].values()),
+            textinfo='label+percent+value',
+            textposition='auto',
+            marker=dict(
+                colors=['#2E8B57', '#DC143C', '#FF8C00', '#4169E1'],
+                line=dict(color='#FFFFFF', width=2)
+            )
+        )])
+        
+        fig_tipos.update_layout(
+            title="Distribución de Operaciones por Tipo",
+            height=400,
+            showlegend=True,
+            legend=dict(
+                orientation="v",
+                yanchor="middle",
+                y=0.5,
+                xanchor="left",
+                x=1.01
+            )
+        )
+        
+        st.plotly_chart(fig_tipos, use_container_width=True)
+    
+    # Tabla detallada por símbolo
+    st.markdown("#### 📋 Detalle por Símbolo")
+    if estadisticas['por_simbolo']:
+        df_simbolos = pd.DataFrame(estadisticas['por_simbolo']).T
+        df_simbolos = df_simbolos.reset_index()
+        df_simbolos.columns = ['Símbolo'] + list(df_simbolos.columns[1:])
+        
+        # Formatear columnas numéricas
+        for col in ['monto_compras', 'monto_ventas', 'flujo_neto', 'precio_promedio_compra', 'precio_promedio_venta']:
+            if col in df_simbolos.columns:
+                df_simbolos[col] = df_simbolos[col].apply(lambda x: f"${x:,.2f}")
+        
+        # Ordenar por total de operaciones
+        df_simbolos = df_simbolos.sort_values('total_operaciones', ascending=False)
+        
+        st.dataframe(df_simbolos, use_container_width=True, height=400)
+
+def mejorar_escalas_graficos():
+    """
+    Función para mejorar las escalas y orden de los gráficos existentes
+    """
+    # Configuración global para mejorar las escalas
+    config_mejorada = {
+        'displayModeBar': True,
+        'displaylogo': False,
+        'modeBarButtonsToRemove': ['pan2d', 'lasso2d', 'select2d'],
+        'toImageButtonOptions': {
+            'format': 'png',
+            'filename': 'grafico_portafolio',
+            'height': 500,
+            'width': 800,
+            'scale': 2
+        }
+    }
+    
+    # Configuración de colores mejorada
+    colores_mejorados = {
+        'primario': '#1f77b4',
+        'secundario': '#ff7f0e', 
+        'exito': '#2ca02c',
+        'error': '#d62728',
+        'advertencia': '#ff7f0e',
+        'info': '#17a2b8',
+        'gris': '#6c757d'
+    }
+    
+    return config_mejorada, colores_mejorados
+
+# --- Funciones Unificadas de movimientosiol.py ---
+
+def obtener_movimientos_mejorado(access_token, fecha_desde=None, fecha_hasta=None):
+    """
+    Obtiene los movimientos/operaciones de la cuenta usando la API de InvertirOnline
+    Versión mejorada con parámetros de fecha correctos
+    
+    Args:
+        access_token (str): Token de acceso para la autenticación
+        fecha_desde (str): Fecha desde en formato YYYY-MM-DD (opcional)
+        fecha_hasta (str): Fecha hasta en formato YYYY-MM-DD (opcional)
+    
+    Returns:
+        list: Lista de operaciones/movimientos de la cuenta
+    """
+    url = 'https://api.invertironline.com/api/v2/operaciones'
+    
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {access_token}'
+    }
+    
+    # Parámetros de consulta para filtrar por fechas (formato correcto de la API)
+    params = {
+        'filtro.pais': 'argentina'  # País por defecto
+    }
+    if fecha_desde:
+        params['filtro.fechaDesde'] = fecha_desde
+    if fecha_hasta:
+        params['filtro.fechaHasta'] = fecha_hasta
+    
+    try:
+        print(f"🔗 Llamando a la API con parámetros: {params}")
+        response = requests.get(url, headers=headers, params=params)
+        
+        if response.status_code == 200:
+            operaciones = response.json()
+            print(f"📊 API devolvió {len(operaciones)} operaciones")
+            if fecha_desde or fecha_hasta:
+                print(f"📅 Filtro aplicado: desde {fecha_desde or 'inicio'} hasta {fecha_hasta or 'actual'}")
+            return operaciones
+        else:
+            print(f'Error en la solicitud: {response.status_code}')
+            print(f'Respuesta: {response.text}')
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        print(f'Error en la conexión: {e}')
+        return None
+
+def calcular_valor_portafolio_historico_mejorado(access_token, operaciones, fecha_desde=None, fecha_hasta=None):
+    """
+    Calcula el valor del portafolio a lo largo del tiempo basado en todas las operaciones históricas
+    Versión mejorada con manejo correcto de fechas
+    
+    Args:
+        access_token (str): Token de acceso para la autenticación
+        operaciones (list): Lista de operaciones obtenidas de la API
+        fecha_desde (str): Fecha desde en formato YYYY-MM-DD (opcional)
+        fecha_hasta (str): Fecha hasta en formato YYYY-MM-DD (opcional)
+    
+    Returns:
+        tuple: (DataFrame con valores del portafolio, posiciones actuales, DataFrame de flujo de efectivo)
+    """
+    if not operaciones:
+        print("No hay operaciones para analizar")
+        return None
+    
+    # Convertir operaciones a DataFrame
+    df_ops = pd.DataFrame(operaciones)
+    df_ops['fechaOrden'] = pd.to_datetime(df_ops['fechaOrden'], format='mixed')
+    df_ops = df_ops.sort_values('fechaOrden')
+    
+    # Obtener símbolos únicos
+    simbolos = df_ops['simbolo'].unique()
+    print(f"Símbolos encontrados: {list(simbolos)}")
+    
+    # Calcular posición actual por símbolo y flujo de efectivo
+    posiciones = {}
+    flujo_efectivo = []
+    
+    for simbolo in simbolos:
+        ops_simbolo = df_ops[df_ops['simbolo'] == simbolo]
+        cantidad_total = 0
+        
+        for _, op in ops_simbolo.iterrows():
+            if op['tipo'] == 'Compra':
+                cantidad_total += op['cantidadOperada']
+                flujo_efectivo.append({
+                    'fecha': op['fechaOrden'],
+                    'tipo': 'Compra',
+                    'simbolo': simbolo,
+                    'monto': -op['montoOperado'],  # Salida de efectivo
+                    'cantidad': op['cantidadOperada'],
+                    'precio': op['precioOperado']
+                })
+            elif op['tipo'] == 'Venta':
+                cantidad_total -= op['cantidadOperada']
+                flujo_efectivo.append({
+                    'fecha': op['fechaOrden'],
+                    'tipo': 'Venta',
+                    'simbolo': simbolo,
+                    'monto': op['montoOperado'],  # Entrada de efectivo
+                    'cantidad': op['cantidadOperada'],
+                    'precio': op['precioOperado']
+                })
+        
+        posiciones[simbolo] = cantidad_total
+        print(f"Posición actual en {simbolo}: {cantidad_total}")
+    
+    # Crear DataFrame de flujo de efectivo
+    df_flujo = pd.DataFrame(flujo_efectivo)
+    df_flujo = df_flujo.sort_values('fecha')
+    
+    # Calcular valor acumulado del portafolio (flujo de efectivo neto)
+    df_flujo['valor_acumulado'] = df_flujo['monto'].cumsum()
+    
+    # Crear serie temporal del valor del portafolio
+    if fecha_desde:
+        fecha_inicio = pd.to_datetime(fecha_desde).date()
+    else:
+        fecha_inicio = df_ops['fechaOrden'].min().date()
+    
+    if fecha_hasta:
+        fecha_fin = pd.to_datetime(fecha_hasta).date()
+    else:
+        fecha_fin = datetime.now().date()
+    
+    fechas = pd.date_range(start=fecha_inicio, end=fecha_fin, freq='D')
+    
+    valores_portafolio = []
+    for fecha in fechas:
+        # Buscar el último valor acumulado hasta esa fecha
+        valores_hasta_fecha = df_flujo[df_flujo['fecha'] <= fecha]
+        if not valores_hasta_fecha.empty:
+            valor = valores_hasta_fecha['valor_acumulado'].iloc[-1]
+        else:
+            valor = 0
+        valores_portafolio.append(valor)
+    
+    # Crear DataFrame final
+    df_portafolio = pd.DataFrame({
+        'fecha': fechas,
+        'valor': valores_portafolio
+    })
+    
+    return df_portafolio, posiciones, df_flujo
+
+def mostrar_analisis_historico_completo(access_token, fecha_desde=None, fecha_hasta=None):
+    """
+    Función principal que obtiene operaciones, calcula el valor del portafolio histórico y crea gráficos
+    Versión mejorada para Streamlit
+    
+    Args:
+        access_token (str): Token de acceso para la autenticación
+        fecha_desde (str): Fecha desde en formato YYYY-MM-DD (opcional)
+        fecha_hasta (str): Fecha hasta en formato YYYY-MM-DD (opcional)
+    """
+    st.markdown("### 📊 Análisis Histórico del Portafolio")
+    
+    with st.spinner("🔍 Analizando portafolio histórico completo..."):
+        # 1. Obtener operaciones
+        st.info("📊 Obteniendo operaciones...")
+        operaciones = obtener_movimientos_mejorado(access_token, fecha_desde, fecha_hasta)
+        
+        if not operaciones:
+            st.error("❌ No se pudieron obtener operaciones")
+            return
+        
+        st.success(f"✅ Se obtuvieron {len(operaciones)} operaciones")
+        
+        # Mostrar información detallada de las operaciones
+        if operaciones:
+            df_ops_debug = pd.DataFrame(operaciones)
+            df_ops_debug['fechaOrden'] = pd.to_datetime(df_ops_debug['fechaOrden'], format='mixed')
+            st.info(f"📅 Rango de fechas: {df_ops_debug['fechaOrden'].min().strftime('%Y-%m-%d')} a {df_ops_debug['fechaOrden'].max().strftime('%Y-%m-%d')}")
+            st.info(f"📊 Símbolos encontrados: {list(df_ops_debug['simbolo'].unique())}")
+            st.info(f"📈 Tipos de operación: {list(df_ops_debug['tipo'].unique())}")
+        
+        # 2. Calcular estadísticas de operaciones
+        st.info("📊 Calculando estadísticas de operaciones...")
+        estadisticas = calcular_estadisticas_operaciones(operaciones, access_token)
+        
+        if estadisticas:
+            mostrar_estadisticas_operaciones_mejoradas(estadisticas)
+        
+        # 3. Calcular valor del portafolio histórico
+        st.info("💰 Calculando valor del portafolio histórico...")
+        resultado = calcular_valor_portafolio_historico_mejorado(access_token, operaciones, fecha_desde, fecha_hasta)
+        
+        if resultado is None:
+            st.error("❌ No se pudo calcular el valor del portafolio")
+            return
+        
+        df_portafolio, posiciones, df_flujo = resultado
+        st.success("✅ Cálculo del portafolio histórico completado")
+        
+        # 4. Mostrar gráficos mejorados
+        st.markdown("#### 📈 Evolución del Valor del Portafolio")
+        
+        # Gráfico de evolución del portafolio
+        fig_portafolio = go.Figure()
+        fig_portafolio.add_trace(go.Scatter(
+            x=df_portafolio['fecha'],
+            y=df_portafolio['valor'],
+            mode='lines',
+            name='Valor del Portafolio',
+            line=dict(color='#1f77b4', width=3),
+            fill='tonexty'
+        ))
+        
+        fig_portafolio.update_layout(
+            title="Evolución del Valor del Portafolio",
+            xaxis_title="Fecha",
+            yaxis_title="Valor ($)",
+            height=500,
+            showlegend=True,
+            xaxis=dict(
+                tickformat='%Y-%m-%d',
+                tickmode='auto',
+                nticks=10
+            ),
+            yaxis=dict(
+                tickformat='$,.0f',
+                tickmode='linear'
+            )
+        )
+        
+        st.plotly_chart(fig_portafolio, use_container_width=True)
+        
+        # Gráfico de flujo de efectivo
+        if df_flujo is not None and not df_flujo.empty:
+            st.markdown("#### 💰 Flujo de Efectivo Acumulado")
+            
+            fig_flujo = go.Figure()
+            fig_flujo.add_trace(go.Scatter(
+                x=df_flujo['fecha'],
+                y=df_flujo['valor_acumulado'],
+                mode='lines',
+                name='Flujo de Efectivo Neto',
+                line=dict(color='#2ca02c', width=3)
+            ))
+            
+            fig_flujo.update_layout(
+                title="Flujo de Efectivo Acumulado",
+                xaxis_title="Fecha",
+                yaxis_title="Flujo Acumulado ($)",
+                height=400,
+                showlegend=True,
+                xaxis=dict(
+                    tickformat='%Y-%m-%d',
+                    tickmode='auto',
+                    nticks=10
+                ),
+                yaxis=dict(
+                    tickformat='$,.0f',
+                    tickmode='linear'
+                )
+            )
+            
+            st.plotly_chart(fig_flujo, use_container_width=True)
+        
+        # Mostrar resumen ejecutivo
+        st.markdown("#### 📋 Resumen Ejecutivo")
+        
+        valor_actual = df_portafolio['valor'].iloc[-1]
+        valor_inicial = df_portafolio['valor'].iloc[0]
+        rendimiento_total = ((valor_actual - valor_inicial) / valor_inicial * 100) if valor_inicial > 0 else 0
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Valor Inicial", f"${valor_inicial:,.2f}")
+        with col2:
+            st.metric("Valor Actual", f"${valor_actual:,.2f}")
+        with col3:
+            st.metric("Rendimiento Total", f"{rendimiento_total:+.2f}%")
+        with col4:
+            st.metric("Período", f"{(df_portafolio['fecha'].iloc[-1] - df_portafolio['fecha'].iloc[0]).days} días")
+        
+        st.success("🎉 Análisis histórico del portafolio completado!")
+        
+        return df_portafolio, operaciones, posiciones, df_flujo
 
 if __name__ == "__main__":
     main() 
