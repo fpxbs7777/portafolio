@@ -6831,7 +6831,7 @@ def obtener_datos_benchmark_argentino(benchmark, token_acceso, fecha_desde, fech
     try:
         if benchmark == 'Tasa_Caucion_Promedio':
             # Simular retornos de tasa de caución promedio
-                        fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+            fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
             retornos_simulados = np.random.normal(0.0003, 0.01, len(fechas))  # 0.03% diario promedio
             return pd.DataFrame({'Tasa_Caucion_Promedio': retornos_simulados}, index=fechas)
         
