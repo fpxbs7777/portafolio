@@ -5030,8 +5030,6 @@ def mostrar_estado_cuenta(estado_cuenta, es_eeuu=False):
                 st.warning("No hay activos con valuación válida para mostrar la composición")
         else:
             st.warning("No hay datos suficientes para mostrar la composición")
-    else:
-        st.warning("No se encontraron activos en el portafolio")
 
 def mostrar_estado_cuenta(estado_cuenta, es_eeuu=False):
     """
