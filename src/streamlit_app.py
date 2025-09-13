@@ -16,6 +16,8 @@ import matplotlib.pyplot as plt
 import concurrent.futures
 from functools import lru_cache
 import time
+import asyncio
+import aiohttp
 
 warnings.filterwarnings('ignore')
 
@@ -4191,23 +4193,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
                 'Clasificación del riesgo basada en volatilidad'
             ])
             
-            # Nivel de concentración con colores y descripción
-            with col3:
-                if metricas['concentracion'] < 0.3:
-                    nivel = "🟢 Baja"
-                    descripcion = "Portafolio bien diversificado"
-                elif metricas['concentracion'] < 0.6:
-                    nivel = "🟡 Media"
-                    descripcion = "Concentración moderada"
-                else:
-                    nivel = "🔴 Alta"
-                    descripcion = "Alta concentración de riesgo"
-                
-                st.metric(
-                    label="📈 Nivel de Riesgo", 
-                    value=nivel,
-                    help=descripcion
-                )
             
             # Agregar proyecciones de rendimiento
             retorno_anual_pct = metricas['retorno_esperado_anual'] * 100
