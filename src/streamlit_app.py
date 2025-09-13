@@ -1041,10 +1041,10 @@ async def obtener_historico_mep_async(token_acceso, fecha_desde, fecha_hasta):
                 precios = serie.values.tolist()
                 fechas = serie.index.tolist()
                 
-                    datos_series[simbolo] = {
-                        'precios': precios,
-                        'fechas': fechas
-                    }
+                datos_series[simbolo] = {
+                    'precios': precios,
+                    'fechas': fechas
+                }
         
         # Verificar que tenemos datos para ambos tickers
         if 'AL30' not in datos_series or 'AL30D' not in datos_series:
@@ -10303,7 +10303,7 @@ def crear_grafico_composicion_evolutiva(timeline):
     simbolos = set()
     for t in timeline:
         if 'composicion' in t and t['composicion']:
-        simbolos.update(t['composicion'].keys())
+            simbolos.update(t['composicion'].keys())
     
     simbolos = sorted(list(simbolos))
     
@@ -10323,14 +10323,14 @@ def crear_grafico_composicion_evolutiva(timeline):
         
         # Solo agregar si hay valores positivos
         if any(v > 0 for v in valores):
-        fig_composicion.add_trace(go.Scatter(
-            x=fechas,
-            y=valores,
-            mode='lines',
-            fill='tonexty',
-            name=simbolo,
-            hovertemplate=f'<b>{simbolo}</b><br>Valor: $%{{y:,.2f}}<extra></extra>'
-        ))
+            fig_composicion.add_trace(go.Scatter(
+                x=fechas,
+                y=valores,
+                mode='lines',
+                fill='tonexty',
+                name=simbolo,
+                hovertemplate=f'<b>{simbolo}</b><br>Valor: $%{{y:,.2f}}<extra></extra>'
+            ))
     
     if len(fig_composicion.data) == 0:
         st.warning("⚠️ No hay datos válidos para mostrar en el gráfico de composición")
