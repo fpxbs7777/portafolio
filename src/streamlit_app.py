@@ -4145,57 +4145,51 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
         metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
         
         # Información General - Diseño mejorado
+        # Crear DataFrame con resumen ejecutivo
         st.markdown("### 📊 Resumen Ejecutivo")
         
-        # Primera fila: Métricas principales
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric(
-                label="💰 Valor Total", 
-                value=f"${valor_total:,.0f}",
-                help="Valor total del portafolio en pesos argentinos"
-            )
-        with col2:
-            st.metric(
-                label="📈 Total Activos", 
-                value=len(datos_activos),
-                help="Número total de posiciones en el portafolio"
-            )
-        with col3:
-            st.metric(
-                label="🎯 Símbolos Únicos", 
-                value=df_activos['Símbolo'].nunique(),
-                help="Número de instrumentos diferentes"
-            )
-        with col4:
-            st.metric(
-                label="📋 Tipos de Activos", 
-                value=df_activos['Tipo'].nunique(),
-                help="Diversificación por tipo de instrumento"
-            )
+        # Preparar datos para el DataFrame
+        resumen_data = {
+            'Métrica': [
+                '💰 Valor Total',
+                '📈 Total Activos', 
+                '🎯 Símbolos Únicos',
+                '📋 Tipos de Activos'
+            ],
+            'Valor': [
+                f"${valor_total:,.0f}",
+                len(datos_activos),
+                df_activos['Símbolo'].nunique(),
+                df_activos['Tipo'].nunique()
+            ],
+            'Descripción': [
+                'Valor total del portafolio en pesos argentinos',
+                'Número total de posiciones en el portafolio',
+                'Número de instrumentos diferentes',
+                'Diversificación por tipo de instrumento'
+            ]
+        }
         
         if metricas:
-            # Segunda fila: Análisis de Riesgo
-            st.markdown("### ⚖️ Análisis de Riesgo")
-            col1, col2, col3 = st.columns(3)
-            
-            # Mostrar concentración como porcentaje
+            # Agregar métricas de riesgo
             concentracion_pct = metricas['concentracion'] * 100
-            with col1:
-                st.metric(
-                    label="🎯 Concentración", 
-                    value=f"{concentracion_pct:.1f}%",
-                    help="Índice de Herfindahl: 0%=muy diversificado, 100%=muy concentrado"
-                )
-            
-            # Mostrar volatilidad como porcentaje anual
             volatilidad_pct = metricas['std_dev_activo'] * 100
-            with col2:
-                st.metric(
-                    label="📊 Volatilidad Anual", 
-                    value=f"{volatilidad_pct:.1f}%",
-                    help="Variabilidad esperada de los retornos anuales"
-                )
+            
+            resumen_data['Métrica'].extend([
+                '🎯 Concentración',
+                '📊 Volatilidad Anual',
+                '📈 Nivel de Riesgo'
+            ])
+            resumen_data['Valor'].extend([
+                f"{concentracion_pct:.1f}%",
+                f"{volatilidad_pct:.1f}%",
+                "🟢 Baja" if volatilidad_pct < 15 else "🟡 Media" if volatilidad_pct < 25 else "🔴 Alta"
+            ])
+            resumen_data['Descripción'].extend([
+                'Índice de Herfindahl: 0%=muy diversificado, 100%=muy concentrado',
+                'Variabilidad esperada de los retornos anuales',
+                'Clasificación del riesgo basada en volatilidad'
+            ])
             
             # Nivel de concentración con colores y descripción
             with col3:
@@ -4215,68 +4209,64 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
                     help=descripcion
                 )
             
-            # Tercera fila: Proyecciones de Rendimiento
-            st.markdown("### 📈 Proyecciones de Rendimiento")
-            col1, col2, col3 = st.columns(3)
-            
-            # Mostrar retornos como porcentaje del portafolio
+            # Agregar proyecciones de rendimiento
             retorno_anual_pct = metricas['retorno_esperado_anual'] * 100
-            with col1:
-                st.metric(
-                    label="📊 Retorno Esperado", 
-                    value=f"{retorno_anual_pct:+.1f}%",
-                    help="Retorno promedio esperado para el próximo año"
-                )
-            
-            # Mostrar escenarios como porcentaje del portafolio
             optimista_pct = (metricas['pl_esperado_max'] / valor_total) * 100 if valor_total > 0 else 0
-            with col2:
-                st.metric(
-                    label="🚀 Escenario Optimista", 
-                    value=f"{optimista_pct:+.1f}%",
-                    help="Retorno en el mejor 5% de escenarios (percentil 95)"
-                )
-            
             pesimista_pct = (metricas['pl_esperado_min'] / valor_total) * 100 if valor_total > 0 else 0
-            with col3:
-                st.metric(
-                    label="⚠️ Escenario Pesimista", 
-                    value=f"{pesimista_pct:+.1f}%",
-                    help="Retorno en el peor 5% de escenarios (percentil 5)"
-                )
             
-            # Cuarta fila: Probabilidades
-            st.markdown("### 🎯 Análisis Probabilístico")
-            col1, col2, col3, col4 = st.columns(4)
-            probs = metricas['probabilidades']
+            resumen_data['Métrica'].extend([
+                '📊 Retorno Esperado',
+                '🚀 Escenario Optimista',
+                '⚠️ Escenario Pesimista'
+            ])
+            resumen_data['Valor'].extend([
+                f"{retorno_anual_pct:+.1f}%",
+                f"{optimista_pct:+.1f}%",
+                f"{pesimista_pct:+.1f}%"
+            ])
+            resumen_data['Descripción'].extend([
+                'Retorno promedio esperado para el próximo año',
+                'Retorno en el mejor 5% de escenarios (percentil 95)',
+                'Retorno en el peor 5% de escenarios (percentil 5)'
+            ])
             
-            with col1:
-                st.metric(
-                    label="✅ Prob. Ganancia", 
-                    value=f"{probs['ganancia']*100:.1f}%",
-                    help="Probabilidad de obtener retornos positivos"
-                )
+            # Agregar análisis probabilístico
+            prob_ganancia = metricas['prob_ganancia'] * 100
+            prob_perdida = metricas['prob_perdida'] * 100
+            prob_ganancia_10 = metricas['prob_ganancia_10'] * 100
+            prob_perdida_10 = metricas['prob_perdida_10'] * 100
             
-            with col2:
-                st.metric(
-                    label="❌ Prob. Pérdida", 
-                    value=f"{probs['perdida']*100:.1f}%",
-                    help="Probabilidad de obtener retornos negativos"
-                )
-            
-            with col3:
-                st.metric(
-                    label="🚀 Ganancia >10%", 
-                    value=f"{probs['ganancia_mayor_10']*100:.1f}%",
-                    help="Probabilidad de ganancias superiores al 10%"
-                )
-            
-            with col4:
-                st.metric(
-                    label="⚠️ Pérdida >10%", 
-                    value=f"{probs['perdida_mayor_10']*100:.1f}%",
-                    help="Probabilidad de pérdidas superiores al 10%"
-                )
+            resumen_data['Métrica'].extend([
+                '✅ Prob. Ganancia',
+                '❌ Prob. Pérdida',
+                '🚀 Ganancia >10%',
+                '⚠️ Pérdida >10%'
+            ])
+            resumen_data['Valor'].extend([
+                f"{prob_ganancia:.1f}%",
+                f"{prob_perdida:.1f}%",
+                f"{prob_ganancia_10:.1f}%",
+                f"{prob_perdida_10:.1f}%"
+            ])
+            resumen_data['Descripción'].extend([
+                'Probabilidad de obtener ganancias',
+                'Probabilidad de obtener pérdidas',
+                'Probabilidad de ganancias superiores al 10%',
+                'Probabilidad de pérdidas superiores al 10%'
+            ])
+        
+        # Crear y mostrar el DataFrame
+        df_resumen = pd.DataFrame(resumen_data)
+        st.dataframe(
+            df_resumen,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Métrica": st.column_config.TextColumn("Métrica", width="medium"),
+                "Valor": st.column_config.TextColumn("Valor", width="small"),
+                "Descripción": st.column_config.TextColumn("Descripción", width="large")
+            }
+        )
         
         # Gráficos
         st.subheader("📊 Distribución de Activos")
@@ -4814,14 +4804,36 @@ def mostrar_estado_cuenta(estado_cuenta):
         
         datos_cuentas = []
         for cuenta in cuentas:
-            datos_cuentas.append({
-                'Número': cuenta.get('numero', 'N/A'),
-                'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
-                'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
-                'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
-                'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
-                'Total': f"${cuenta.get('total', 0):,.2f}",
-            })
+            # Obtener valores y validar coherencia
+            disponible = float(cuenta.get('disponible', 0))
+            saldo = float(cuenta.get('saldo', 0))
+            total = float(cuenta.get('total', 0))
+            
+            # Validar coherencia: Total debería ser Disponible + Saldo
+            total_calculado = disponible + saldo
+            
+            # Si hay gran diferencia, usar el total de la API pero mostrar advertencia
+            if abs(total - total_calculado) > 0.01:
+                # Usar el total de la API pero mostrar los valores individuales
+                datos_cuentas.append({
+                    'Número': cuenta.get('numero', 'N/A'),
+                    'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
+                    'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
+                    'Disponible': f"${disponible:,.2f}",
+                    'Saldo': f"${saldo:,.2f}",
+                    'Total (API)': f"${total:,.2f}",
+                    'Total (Calc)': f"${total_calculado:,.2f}",
+                })
+            else:
+                # Valores coherentes
+                datos_cuentas.append({
+                    'Número': cuenta.get('numero', 'N/A'),
+                    'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
+                    'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
+                    'Disponible': f"${disponible:,.2f}",
+                    'Saldo': f"${saldo:,.2f}",
+                    'Total': f"${total:,.2f}",
+                })
         
         df_cuentas = pd.DataFrame(datos_cuentas)
         st.dataframe(df_cuentas, use_container_width=True, height=300)
@@ -4829,6 +4841,21 @@ def mostrar_estado_cuenta(estado_cuenta):
         # Mostrar resumen
         if numero_cuentas_unicas != len(cuentas):
             st.info(f"ℹ️ **Nota**: Se muestran {len(cuentas)} registros de {numero_cuentas_unicas} cuentas únicas")
+        
+        # Verificar si hay incoherencias en los datos
+        incoherencias_detectadas = False
+        for cuenta in cuentas:
+            disponible = float(cuenta.get('disponible', 0))
+            saldo = float(cuenta.get('saldo', 0))
+            total = float(cuenta.get('total', 0))
+            total_calculado = disponible + saldo
+            
+            if abs(total - total_calculado) > 0.01:
+                incoherencias_detectadas = True
+                break
+        
+        if incoherencias_detectadas:
+            st.warning("⚠️ **Advertencia**: Se detectaron incoherencias en los datos del estado de cuenta. Los valores 'Total' de la API no coinciden con la suma de 'Disponible' + 'Saldo'. Esto puede deberse a diferencias en el procesamiento de la API de IOL.")
 
 def obtener_parametros_operatoria_mep(token_acceso):
     """
@@ -5055,7 +5082,7 @@ def ejecutar_venta_mep(token_acceso, monto):
 
 def obtener_historico_mep(token_acceso, fecha_desde, fecha_hasta):
     """
-    Obtiene el histórico del dólar MEP calculado como AL30/AL30D desde la API de IOL
+    Obtiene el histórico del dólar MEP calculado como AL30/AL30D usando el método directo
     
     Args:
         token_acceso (str): Token de acceso para la autenticación
@@ -5068,32 +5095,74 @@ def obtener_historico_mep(token_acceso, fecha_desde, fecha_hasta):
     try:
         st.info(f"🔗 Consultando histórico MEP desde {fecha_desde} hasta {fecha_hasta}")
         
-        # Obtener datos históricos de AL30 (pesos)
-        st.info("📊 Obteniendo datos históricos de AL30 (pesos)...")
-        datos_al30 = obtener_serie_historica_iol(token_acceso, "bCBA", "al30", fecha_desde, fecha_hasta, "ajustada")
+        # Usar el método directo para obtener series históricas
+        tickers_especificos = ['AL30', 'AL30D']
+        mercado = 'bCBA'
+        ajustada = 'SinAjustar'
         
-        # Obtener datos históricos de AL30D (dólares)
-        st.info("📊 Obteniendo datos históricos de AL30D (dólares)...")
-        datos_al30d = obtener_serie_historica_iol(token_acceso, "bCBA", "al30d", fecha_desde, fecha_hasta, "ajustada")
+        datos_series = {}
         
-        if not datos_al30 or not datos_al30d:
+        for simbolo in tickers_especificos:
+            st.info(f"📊 Obteniendo datos históricos de {simbolo}...")
+            
+            # Usar la función directa que ya tenemos implementada
+            serie_historica = obtener_serie_historica_directa(
+                simbolo, mercado, fecha_desde, fecha_hasta, ajustada, token_acceso
+            )
+            
+            if serie_historica and len(serie_historica) > 0:
+                # Procesar los datos de la serie histórica
+                precios = []
+                fechas = []
+                
+                for item in serie_historica:
+                    try:
+                        precio = item.get('ultimoPrecio')
+                        if not precio or precio == 0:
+                            precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
+                        
+                        fecha_str = item.get('fechaHora') or item.get('fecha')
+                        
+                        if precio is not None and precio > 0 and fecha_str:
+                            fecha_parsed = parse_datetime_flexible(fecha_str)
+                            if fecha_parsed is not None:
+                                precios.append(precio)
+                                fechas.append(fecha_parsed)
+                                
+                    except Exception as e:
+                        continue
+                
+                if len(precios) > 0:
+                    # Crear DataFrame con los datos
+                    df = pd.DataFrame({
+                        'fecha': fechas,
+                        'precio': precios
+                    })
+                    df['fecha'] = pd.to_datetime(df['fecha'])
+                    df = df.sort_values('fecha')
+                    datos_series[simbolo] = df
+                    st.success(f"✅ {simbolo}: {len(df)} puntos de datos")
+                else:
+                    st.warning(f"⚠️ No se obtuvieron datos válidos para {simbolo}")
+            else:
+                st.warning(f"⚠️ No se pudieron obtener datos para {simbolo}")
+        
+        # Verificar que tenemos datos para ambos símbolos
+        if 'AL30' not in datos_series or 'AL30D' not in datos_series:
             st.warning("⚠️ No se pudieron obtener datos completos para calcular el MEP")
-            if not datos_al30:
+            if 'AL30' not in datos_series:
                 st.warning("❌ No hay datos de AL30 (pesos)")
-            if not datos_al30d:
+            if 'AL30D' not in datos_series:
                 st.warning("❌ No hay datos de AL30D (dólares)")
             return None
         
-        # Crear DataFrames para facilitar el cálculo
-        df_al30 = pd.DataFrame(datos_al30)
-        df_al30d = pd.DataFrame(datos_al30d)
-        
-        # Convertir fechas a datetime
-        df_al30['fecha'] = pd.to_datetime(df_al30['fecha'])
-        df_al30d['fecha'] = pd.to_datetime(df_al30d['fecha'])
-        
         # Hacer merge por fecha para alinear los datos
-        df_merged = pd.merge(df_al30, df_al30d, on='fecha', suffixes=('_al30', '_al30d'))
+        df_merged = pd.merge(
+            datos_series['AL30'], 
+            datos_series['AL30D'], 
+            on='fecha', 
+            suffixes=('_al30', '_al30d')
+        )
         
         # Calcular MEP = AL30 / AL30D
         df_merged['mep'] = df_merged['precio_al30'] / df_merged['precio_al30d']
@@ -9541,15 +9610,28 @@ def mostrar_analisis_portafolio():
                     
                     pais = "🇺🇸 EEUU" if es_cuenta_eeuu else "🇦🇷 Argentina"
                     
+                    # Obtener valores y validar coherencia
+                    disponible = float(cuenta.get('disponible', 0))
+                    saldo = float(cuenta.get('saldo', 0))
+                    total = float(cuenta.get('total', 0))
+                    
+                    # Validar coherencia: Total debería ser Disponible + Saldo
+                    total_calculado = disponible + saldo
+                    
                     # Crear diccionario base
                     cuenta_data = {
                         'País': pais,
                         'Número': numero,
                         'Moneda': moneda.replace('_', ' ').title(),
-                        'Disponible': cuenta.get('disponible', 0),
-                        'Saldo': cuenta.get('saldo', 0),
-                        'Total': cuenta.get('total', 0),
+                        'Disponible': disponible,
+                        'Saldo': saldo,
+                        'Total': total,
                     }
+                    
+                    # Si hay incoherencia, agregar columna de advertencia
+                    if abs(total - total_calculado) > 0.01:
+                        cuenta_data['Total (Calc)'] = total_calculado
+                        cuenta_data['⚠️ Incoherencia'] = f"API: {total:,.2f} vs Calc: {total_calculado:,.2f}"
                     
                     # Solo agregar descripción si hay descripciones válidas
                     if descripciones_validas:
