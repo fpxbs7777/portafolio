@@ -5183,17 +5183,17 @@ def mostrar_estado_cuenta(estado_cuenta):
         cuentas_unicas[clave_unica] = cuenta
     
     numero_cuentas_unicas = len(cuentas_unicas)
-        
-        cols = st.columns(3)
+    
+    cols = st.columns(3)
     cols[0].metric("Total en Pesos", f"AR$ {total_en_pesos:,.2f}")
     cols[1].metric("Número de Cuentas", numero_cuentas_unicas)
     cols[2].metric("Total de Registros", len(cuentas))
-        
-        if cuentas:
+    
+    if cuentas:
         st.subheader("📊 Detalle de Cuentas")
-            
-            datos_cuentas = []
-            for cuenta in cuentas:
+        
+        datos_cuentas = []
+        for cuenta in cuentas:
             # Obtener valores y validar coherencia
             disponible = float(cuenta.get('disponible', 0))
             saldo = float(cuenta.get('saldo', 0))
