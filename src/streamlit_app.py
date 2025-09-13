@@ -1727,17 +1727,17 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                             serie = serie.sort_index()
                             
                             # Verificar que la serie tenga variación
-                            if serie.nunique() > 1:
+                        if serie.nunique() > 1:
                                 series_data[simbolo] = serie
                                 simbolos_exitosos.append(simbolo)
                                 serie_encontrada = True
                                 mercado_encontrado = mercado
-                                
-                                # Mostrar información del símbolo exitoso
-                                if len(simbolos_exitosos) <= 10:
-                                    st.success(f"✅ {simbolo} ({mercado}): {len(serie)} puntos de datos")
-                                break
-                                
+                            
+                            # Mostrar información del símbolo exitoso
+                            if len(simbolos_exitosos) <= 10:
+                                st.success(f"✅ {simbolo} ({mercado}): {len(serie)} puntos de datos")
+                            break
+                        
                 except Exception as e:
                     continue
             
@@ -1835,28 +1835,28 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                 df_precios_filled = df_precios.fillna(method='ffill').fillna(method='bfill')
                 
                 if not df_precios_filled.dropna().empty and len(df_precios_filled.dropna()) >= 30:
-                    df_precios = df_precios_filled.dropna()
-                    st.info("✅ Usando estrategia forward/backward fill")
+                df_precios = df_precios_filled.dropna()
+                st.info("✅ Usando estrategia forward/backward fill")
                 else:
                     # Estrategia 3: Interpolar valores faltantes
                     df_precios_interpolated = df_precios.interpolate(method='time')
                     
                     if not df_precios_interpolated.dropna().empty and len(df_precios_interpolated.dropna()) >= 30:
-                        df_precios = df_precios_interpolated.dropna()
-                        st.info("✅ Usando estrategia de interpolación")
-                    else:
+                df_precios = df_precios_interpolated.dropna()
+                st.info("✅ Usando estrategia de interpolación")
+            else:
                         # Estrategia 4: Usar cualquier dato disponible
-                        df_precios = df_precios.dropna()
+                df_precios = df_precios.dropna()
                         if df_precios.empty:
                             st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
                             return None, None, None
                         else:
                             st.warning(f"⚠️ Usando datos limitados: {len(df_precios)} observaciones")
-            
-            if df_precios.empty:
-                st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
-                return None, None, None
-                
+        
+        if df_precios.empty:
+            st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
+            return None, None, None
+        
         except Exception as e:
             st.error(f"❌ Error al alinear datos: {str(e)}")
             return None, None, None
@@ -1867,16 +1867,16 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
             
             if retornos.empty:
                 st.error("❌ No se pudieron calcular retornos válidos")
-                return None, None, None
-                
+            return None, None, None
+        
             st.success(f"✅ Datos alineados: {len(retornos)} fechas, {len(retornos.columns)} activos")
-            
+        
             return df_precios, retornos, simbolos_exitosos
-            
+        
         except Exception as e:
             st.error(f"❌ Error crítico obteniendo datos históricos: {str(e)}")
             return None, None, None
-            
+        
     except Exception as e:
         st.error(f"❌ Error crítico obteniendo datos históricos: {str(e)}")
         return None, None, None
@@ -4184,7 +4184,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
             ])
             resumen_data['Valor'].extend([
                 f"{concentracion_pct:.1f}%",
-                f"{volatilidad_pct:.1f}%",
+                         f"{volatilidad_pct:.1f}%",
                 "🟢 Baja" if volatilidad_pct < 15 else "🟡 Media" if volatilidad_pct < 25 else "🔴 Alta"
             ])
             resumen_data['Descripción'].extend([
@@ -4206,7 +4206,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
             ])
             resumen_data['Valor'].extend([
                 f"{retorno_anual_pct:+.1f}%",
-                f"{optimista_pct:+.1f}%",
+                         f"{optimista_pct:+.1f}%",
                 f"{pesimista_pct:+.1f}%"
             ])
             resumen_data['Descripción'].extend([
@@ -4216,10 +4216,11 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
             ])
             
             # Agregar análisis probabilístico
-            prob_ganancia = metricas['prob_ganancia'] * 100
-            prob_perdida = metricas['prob_perdida'] * 100
-            prob_ganancia_10 = metricas['prob_ganancia_10'] * 100
-            prob_perdida_10 = metricas['prob_perdida_10'] * 100
+            probabilidades = metricas.get('probabilidades', {})
+            prob_ganancia = probabilidades.get('ganancia', 0.5) * 100
+            prob_perdida = probabilidades.get('perdida', 0.5) * 100
+            prob_ganancia_10 = probabilidades.get('ganancia_mayor_10', 0) * 100
+            prob_perdida_10 = probabilidades.get('perdida_mayor_10', 0) * 100
             
             resumen_data['Métrica'].extend([
                 '✅ Prob. Ganancia',
@@ -4758,15 +4759,15 @@ def mostrar_estado_cuenta(estado_cuenta):
     Args:
         estado_cuenta (dict): Datos del estado de cuenta
     """
-    st.markdown("### 💰 Estado de Cuenta")
+        st.markdown("### 💰 Estado de Cuenta")
     
     if not estado_cuenta:
         st.warning("No hay datos de estado de cuenta disponibles")
         return
     
     # Estado de cuenta general
-    total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
-    cuentas = estado_cuenta.get('cuentas', [])
+        total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
+        cuentas = estado_cuenta.get('cuentas', [])
     
     # Contar cuentas únicas por número y tipo
     cuentas_unicas = {}
@@ -4819,10 +4820,10 @@ def mostrar_estado_cuenta(estado_cuenta):
                     'Saldo': f"${saldo:,.2f}",
                     'Total': f"${total:,.2f}",
                 })
-        
-        df_cuentas = pd.DataFrame(datos_cuentas)
-        st.dataframe(df_cuentas, use_container_width=True, height=300)
-        
+            
+            df_cuentas = pd.DataFrame(datos_cuentas)
+            st.dataframe(df_cuentas, use_container_width=True, height=300)
+            
         # Mostrar resumen
         if numero_cuentas_unicas != len(cuentas):
             st.info(f"ℹ️ **Nota**: Se muestran {len(cuentas)} registros de {numero_cuentas_unicas} cuentas únicas")
@@ -4946,7 +4947,7 @@ def obtener_estimacion_compra_mep(token_acceso, monto):
         
         if response.status_code == 200:
             return response.json()
-        else:
+    else:
             st.error(f'Error obteniendo estimación compra: {response.status_code}')
             return None
             
@@ -5522,9 +5523,9 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente, portafolio_ar=None, porta
     if portafolio_ar:
         activos_ar = portafolio_ar.get('activos', [])
         for activo in activos_ar:
-            titulo = activo.get('titulo', {})
-            simbolo = titulo.get('simbolo', '')
-            if simbolo:
+        titulo = activo.get('titulo', {})
+        simbolo = titulo.get('simbolo', '')
+        if simbolo:
                 simbolos.append(f"🇦🇷 {simbolo}")
                 simbolos_info[f"🇦🇷 {simbolo}"] = {
                     'simbolo': simbolo,
@@ -7352,7 +7353,7 @@ def obtener_datos_benchmark_argentino(benchmark, token_acceso, fecha_desde, fech
     try:
         if benchmark == 'Tasa_Caucion_Promedio':
             # Simular retornos de tasa de caución promedio
-            fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+                        fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
             retornos_simulados = np.random.normal(0.0003, 0.01, len(fechas))  # 0.03% diario promedio
             return pd.DataFrame({'Tasa_Caucion_Promedio': retornos_simulados}, index=fechas)
         
@@ -9526,7 +9527,7 @@ def mostrar_analisis_portafolio():
     # Cargar datos con cache y spinner optimizado
     with st.spinner("🔄 Cargando datos del cliente..."):
         try:
-            portafolio_ar, portafolio_eeuu, estado_cuenta_ar, estado_cuenta_eeuu = cargar_datos_cliente(token_acceso, id_cliente)
+        portafolio_ar, portafolio_eeuu, estado_cuenta_ar, estado_cuenta_eeuu = cargar_datos_cliente(token_acceso, id_cliente)
         except Exception as e:
             st.error(f"Error cargando datos del cliente: {str(e)}")
             return
@@ -9559,11 +9560,11 @@ def mostrar_analisis_portafolio():
     
     with tab3:
         # Estado de cuenta consolidado
-        st.subheader("🇦🇷 Estado de Cuenta Argentina")
-        if estado_cuenta_ar:
+            st.subheader("🇦🇷 Estado de Cuenta Argentina")
+            if estado_cuenta_ar:
             mostrar_estado_cuenta(estado_cuenta_ar)
-        else:
-            st.warning("No se pudo obtener el estado de cuenta de Argentina")
+            else:
+                st.warning("No se pudo obtener el estado de cuenta de Argentina")
         
         # Vista consolidada de todas las cuentas
         st.subheader("🔍 Vista Consolidada de Todas las Cuentas")
@@ -10185,4 +10186,4 @@ def main():
         st.error(f"❌ Error en la aplicación: {str(e)}")
 
 if __name__ == "__main__":
-    main()
+    main() 
