@@ -18,3 +18,4 @@ dotenv
 nest_asyncio
 numpy_financial
 SHDA==0.0.4rc4
+option_menu
