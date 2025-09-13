@@ -105,7 +105,7 @@ def obtener_portafolio_argentina(token_portador):
                 st.error("Token de acceso inválido o expirado")
             elif response.status_code == 403:
                 st.error("No tienes permisos para acceder al portafolio de Argentina")
-            return None
+        return None
     except Exception as e:
         st.error(f"Error al obtener portafolio Argentina: {str(e)}")
         return None
@@ -128,7 +128,7 @@ def obtener_portafolio_eeuu(token_portador):
                 st.error("Token de acceso inválido o expirado")
             elif response.status_code == 403:
                 st.error("No tienes permisos para acceder al portafolio de Estados Unidos")
-            return None
+        return None
     except Exception as e:
         st.error(f"Error al obtener portafolio EEUU: {str(e)}")
         return None
@@ -144,8 +144,8 @@ def obtener_estado_cuenta(token_portador):
             return response.json()
         elif response.status_code == 500:
             st.warning("⚠️ No se pudo obtener el estado de cuenta")
-            return None
-        else:
+                return None
+            else:
             st.error(f"Error al obtener estado de cuenta: {response.status_code}")
             if response.status_code == 401:
                 st.error("Token de acceso inválido o expirado")
@@ -154,13 +154,13 @@ def obtener_estado_cuenta(token_portador):
             return None
     except Exception as e:
         st.error(f"Error al obtener estado de cuenta: {str(e)}")
-        return None
-
+                return None
+                
 def filtrar_estado_cuenta_por_moneda(estado_cuenta, moneda="peso_Argentino"):
     """Filtra el estado de cuenta por moneda"""
     if not estado_cuenta or 'cuentas' not in estado_cuenta:
-        return None
-    
+            return None
+            
     cuentas_filtradas = [cuenta for cuenta in estado_cuenta['cuentas'] if cuenta.get('moneda') == moneda]
     
     if cuentas_filtradas:
@@ -169,7 +169,7 @@ def filtrar_estado_cuenta_por_moneda(estado_cuenta, moneda="peso_Argentino"):
             'estadisticas': estado_cuenta.get('estadisticas', []),
             'totalEnPesos': estado_cuenta.get('totalEnPesos', 0)
         }
-    return None
+        return None
 
 def obtener_movimientos(token_portador, fecha_desde=None, fecha_hasta=None, pais="argentina"):
     """
@@ -180,7 +180,7 @@ def obtener_movimientos(token_portador, fecha_desde=None, fecha_hasta=None, pais
         fecha_desde (str): Fecha desde en formato YYYY-MM-DD (opcional)
         fecha_hasta (str): Fecha hasta en formato YYYY-MM-DD (opcional)
         pais (str): País para filtrar operaciones (argentina/estados_Unidos)
-    
+        
     Returns:
         list: Lista de operaciones/movimientos de la cuenta
     """
@@ -224,12 +224,1404 @@ def obtener_notificaciones(token_portador):
         elif response.status_code == 500:
             st.warning("⚠️ No se pudieron obtener las notificaciones")
             return []
-        else:
+            else:
             st.error(f"Error al obtener notificaciones: {response.status_code}")
             return []
     except Exception as e:
         st.error(f"Error al obtener notificaciones: {str(e)}")
         return []
+
+def obtener_datos_perfil_asesor(token_portador):
+    """Obtiene los datos del perfil del asesor"""
+    url = 'https://api.invertironline.com/api/v2/datos-perfil'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 401:
+            st.warning("⚠️ No autorizado para obtener perfil del asesor")
+            return None
+        else:
+            st.error(f"Error al obtener perfil del asesor: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al obtener perfil del asesor: {str(e)}")
+        return None
+
+def obtener_puede_operar(token_portador):
+    """Obtiene si el usuario puede operar"""
+    url = 'https://api.invertironline.com/api/v2/operar/CPD/PuedeOperar'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al verificar si puede operar: {response.status_code}")
+        return None
+    except Exception as e:
+        st.error(f"Error al verificar si puede operar: {str(e)}")
+        return None
+
+def obtener_estado_segmento(token_portador, estado, segmento):
+    """Obtiene el estado de un segmento específico"""
+    url = f'https://api.invertironline.com/api/v2/operar/CPD/{estado}/{segmento}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener estado del segmento: {response.status_code}")
+        return None
+    except Exception as e:
+        st.error(f"Error al obtener estado del segmento: {str(e)}")
+        return None
+
+def obtener_comisiones_cpd(token_portador, importe, plazo, tasa):
+    """Obtiene las comisiones para CPD"""
+    url = f'https://api.invertironline.com/api/v2/operar/CPD/Comisiones/{importe}/{plazo}/{tasa}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener comisiones CPD: {response.status_code}")
+        return None
+    except Exception as e:
+        st.error(f"Error al obtener comisiones CPD: {str(e)}")
+        return None
+
+def operar_cpd(token_portador, datos_operacion):
+    """Realiza una operación de CPD"""
+    url = 'https://api.invertironline.com/api/v2/operar/CPD'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    try:
+        response = requests.post(url, headers=headers, json=datos_operacion, timeout=30)
+        if response.status_code == 200:
+        return response.json()
+    else:
+            st.error(f"Error al operar CPD: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al operar CPD: {str(e)}")
+        return None
+
+def operar_token(token_portador, datos_operacion):
+    """Realiza una operación de token"""
+    url = 'https://api.invertironline.com/api/v2/operar/Token'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    try:
+        response = requests.post(url, headers=headers, json=datos_operacion, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al operar token: {response.status_code}")
+                return None
+                except Exception as e:
+        st.error(f"Error al operar token: {str(e)}")
+                return None
+                
+def vender_activo(token_portador, datos_venta):
+    """Realiza una venta de activo"""
+    url = 'https://api.invertironline.com/api/v2/operar/Vender'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    try:
+        response = requests.post(url, headers=headers, json=datos_venta, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al vender activo: {response.status_code}")
+        return None
+    except Exception as e:
+        st.error(f"Error al vender activo: {str(e)}")
+        return None
+
+def comprar_activo(token_portador, datos_compra):
+    """Realiza una compra de activo"""
+    url = 'https://api.invertironline.com/api/v2/operar/Comprar'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    try:
+        response = requests.post(url, headers=headers, json=datos_compra, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al comprar activo: {response.status_code}")
+        return None
+    except Exception as e:
+        st.error(f"Error al comprar activo: {str(e)}")
+        return None
+
+def rescate_fci(token_portador, datos_rescate):
+    """Realiza un rescate de FCI"""
+    url = 'https://api.invertironline.com/api/v2/operar/rescate/fci'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    try:
+        response = requests.post(url, headers=headers, json=datos_rescate, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al rescatar FCI: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al rescatar FCI: {str(e)}")
+        return None
+
+def vender_especie_d(token_portador, datos_venta):
+    """Realiza una venta de especie D"""
+    url = 'https://api.invertironline.com/api/v2/operar/VenderEspecieD'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    try:
+        response = requests.post(url, headers=headers, json=datos_venta, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+            else:
+            st.error(f"Error al vender especie D: {response.status_code}")
+        return None
+    except Exception as e:
+        st.error(f"Error al vender especie D: {str(e)}")
+        return None
+    
+def comprar_especie_d(token_portador, datos_compra):
+    """Realiza una compra de especie D"""
+    url = 'https://api.invertironline.com/api/v2/operar/ComprarEspecieD'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    try:
+        response = requests.post(url, headers=headers, json=datos_compra, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+            else:
+            st.error(f"Error al comprar especie D: {response.status_code}")
+            return None
+                except Exception as e:
+        st.error(f"Error al comprar especie D: {str(e)}")
+        return None
+
+def suscripcion_fci(token_portador, datos_suscripcion):
+    """Realiza una suscripción a FCI"""
+    url = 'https://api.invertironline.com/api/v2/operar/suscripcion/fci'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    try:
+        response = requests.post(url, headers=headers, json=datos_suscripcion, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+            else:
+            st.error(f"Error al suscribir FCI: {response.status_code}")
+            return None
+        except Exception as e:
+        st.error(f"Error al suscribir FCI: {str(e)}")
+        return None
+
+# Funciones de Operatoria Simplificada
+def obtener_montos_estimados(token_portador, monto):
+    """Obtiene montos estimados para operatoria simplificada"""
+    url = f'https://api.invertironline.com/api/v2/OperatoriaSimplificada/MontosEstimados/{monto}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener montos estimados: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al obtener montos estimados: {str(e)}")
+        return None
+
+def obtener_parametros_operatoria(token_portador, id_tipo_operatoria):
+    """Obtiene parámetros para un tipo de operatoria"""
+    url = f'https://api.invertironline.com/api/v2/OperatoriaSimplificada/{id_tipo_operatoria}/Parametros'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener parámetros de operatoria: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al obtener parámetros de operatoria: {str(e)}")
+        return None
+
+def validar_operatoria(token_portador, monto, id_tipo_operatoria):
+    """Valida una operatoria simplificada"""
+    url = f'https://api.invertironline.com/api/v2/OperatoriaSimplificada/Validar/{monto}/{id_tipo_operatoria}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al validar operatoria: {response.status_code}")
+        return None
+    except Exception as e:
+        st.error(f"Error al validar operatoria: {str(e)}")
+        return None
+
+def obtener_montos_estimados_venta_mep(token_portador, monto):
+    """Obtiene montos estimados para venta MEP simple"""
+    url = f'https://api.invertironline.com/api/v2/OperatoriaSimplificada/VentaMepSimple/MontosEstimados/{monto}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener montos estimados venta MEP: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al obtener montos estimados venta MEP: {str(e)}")
+        return None
+
+def obtener_cotizaciones_mep(token_portador):
+    """Obtiene cotizaciones MEP"""
+    url = 'https://api.invertironline.com/api/v2/Cotizaciones/MEP'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener cotizaciones MEP: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al obtener cotizaciones MEP: {str(e)}")
+            return None
+        
+def comprar_operatoria_simplificada(token_portador, datos_compra):
+    """Realiza una compra usando operatoria simplificada"""
+    url = 'https://api.invertironline.com/api/v2/OperatoriaSimplificada/Comprar'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    try:
+        response = requests.post(url, headers=headers, json=datos_compra, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al comprar con operatoria simplificada: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al comprar con operatoria simplificada: {str(e)}")
+        return None
+
+# Funciones del Test del Inversor para Asesores
+def obtener_test_inversor(token_portador):
+    """Obtiene el test del inversor del asesor"""
+    url = 'https://api.invertironline.com/api/v2/asesores/test-inversor'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+                    else:
+            st.error(f"Error al obtener test del inversor: {response.status_code}")
+            return None
+                    except Exception as e:
+        st.error(f"Error al obtener test del inversor: {str(e)}")
+        return None
+
+def enviar_test_inversor(token_portador, datos_test):
+    """Envía el test del inversor del asesor"""
+    url = 'https://api.invertironline.com/api/v2/asesores/test-inversor'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    try:
+        response = requests.post(url, headers=headers, json=datos_test, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+                    else:
+            st.error(f"Error al enviar test del inversor: {response.status_code}")
+            return None
+                        except Exception as e:
+        st.error(f"Error al enviar test del inversor: {str(e)}")
+        return None
+
+def enviar_test_inversor_cliente(token_portador, id_cliente_asesorado, datos_test):
+    """Envía el test del inversor para un cliente específico"""
+    url = f'https://api.invertironline.com/api/v2/asesores/test-inversor/{id_cliente_asesorado}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    try:
+        response = requests.post(url, headers=headers, json=datos_test, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al enviar test del inversor para cliente {id_cliente_asesorado}: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al enviar test del inversor para cliente {id_cliente_asesorado}: {str(e)}")
+        return None
+
+# --- Nuevas funciones de API para operaciones y detalles ---
+
+def obtener_detalle_operacion(token_portador, numero_operacion):
+    """Obtiene el detalle de una operación específica por número"""
+    url = f'https://api.invertironline.com/api/v2/operaciones/{numero_operacion}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener detalle de operación {numero_operacion}: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al obtener detalle de operación {numero_operacion}: {str(e)}")
+        return None
+
+def obtener_operaciones_filtradas(token_portador, numero=None, estado=None, fecha_desde=None, fecha_hasta=None, pais="argentina"):
+    """Obtiene operaciones con filtros avanzados"""
+    url = 'https://api.invertironline.com/api/v2/operaciones'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    params = {}
+    
+    if numero:
+        params['filtro.numero'] = numero
+    if estado:
+        params['filtro.estado'] = estado
+    if fecha_desde:
+        params['filtro.fechaDesde'] = fecha_desde
+    if fecha_hasta:
+        params['filtro.fechaHasta'] = fecha_hasta
+    if pais:
+        params['filtro.pais'] = pais
+    
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener operaciones filtradas: {response.status_code}")
+            return []
+    except Exception as e:
+        st.error(f"Error al obtener operaciones filtradas: {str(e)}")
+        return []
+
+def obtener_movimientos_asesor(token_portador, clientes=None, fecha_desde=None, fecha_hasta=None, 
+                              tipo_fecha=None, estado=None, tipo=None, pais=None, moneda=None, cuenta_comitente=None):
+    """Obtiene movimientos para asesores con filtros avanzados"""
+    url = 'https://api.invertironline.com/api/v2/Asesor/Movimientos'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    data = {}
+    if clientes:
+        data['clientes'] = clientes
+    if fecha_desde:
+        data['from'] = fecha_desde
+    if fecha_hasta:
+        data['to'] = fecha_hasta
+    if tipo_fecha:
+        data['dateType'] = tipo_fecha
+    if estado:
+        data['status'] = estado
+    if tipo:
+        data['type'] = tipo
+    if pais:
+        data['country'] = pais
+    if moneda:
+        data['currency'] = moneda
+    if cuenta_comitente:
+        data['cuentaComitente'] = cuenta_comitente
+    
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener movimientos del asesor: {response.status_code}")
+            return {}
+    except Exception as e:
+        st.error(f"Error al obtener movimientos del asesor: {str(e)}")
+        return {}
+
+# --- Funciones de operaciones CPD ---
+
+def obtener_estado_segmento_cpd(token_portador, estado, segmento):
+    """Obtiene el estado de un segmento CPD específico"""
+    url = f'https://api.invertironline.com/api/v2/operar/CPD/{estado}/{segmento}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener estado CPD {estado}/{segmento}: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al obtener estado CPD {estado}/{segmento}: {str(e)}")
+        return None
+
+def obtener_comisiones_cpd(token_portador, importe, plazo, tasa):
+    """Obtiene las comisiones para operaciones CPD"""
+    url = f'https://api.invertironline.com/api/v2/operar/CPD/Comisiones/{importe}/{plazo}/{tasa}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener comisiones CPD: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al obtener comisiones CPD: {str(e)}")
+        return None
+
+def operar_cpd(token_portador, id_subasta, tasa, fuente="compra_Venta_Por_Web"):
+    """Realiza una operación CPD"""
+    url = 'https://api.invertironline.com/api/v2/operar/CPD'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    data = {
+        "idSubasta": id_subasta,
+        "tasa": tasa,
+        "fuente": fuente
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al operar CPD: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al operar CPD: {str(e)}")
+        return None
+
+# --- Funciones de operaciones Token ---
+
+def operar_token(token_portador, mercado, simbolo, cantidad, monto):
+    """Realiza una operación con token"""
+    url = 'https://api.invertironline.com/api/v2/operar/Token'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    data = {
+        "mercado": mercado,
+        "simbolo": simbolo,
+        "cantidad": cantidad,
+        "monto": monto
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al operar con token: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al operar con token: {str(e)}")
+        return None
+
+# --- Funciones de operaciones de compra/venta ---
+
+def vender_activo(token_portador, mercado, simbolo, cantidad, precio, validez, tipo_orden="precioLimite", plazo="t0", id_fuente=0):
+    """Vende un activo"""
+    url = 'https://api.invertironline.com/api/v2/operar/Vender'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    data = {
+        "mercado": mercado,
+        "simbolo": simbolo,
+        "cantidad": cantidad,
+        "precio": precio,
+        "validez": validez,
+        "tipoOrden": tipo_orden,
+        "plazo": plazo,
+        "idFuente": id_fuente
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al vender activo: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al vender activo: {str(e)}")
+        return None
+
+def comprar_activo(token_portador, mercado, simbolo, cantidad, precio, plazo, validez, tipo_orden="precioLimite", monto=0, id_fuente=0):
+    """Compra un activo"""
+    url = 'https://api.invertironline.com/api/v2/operar/Comprar'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    data = {
+        "mercado": mercado,
+        "simbolo": simbolo,
+        "cantidad": cantidad,
+        "precio": precio,
+        "plazo": plazo,
+        "validez": validez,
+        "tipoOrden": tipo_orden,
+        "monto": monto,
+        "idFuente": id_fuente
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al comprar activo: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al comprar activo: {str(e)}")
+        return None
+
+# --- Funciones de operaciones FCI ---
+
+def rescate_fci(token_portador, simbolo, cantidad, solo_validar=True):
+    """Realiza un rescate de FCI"""
+    url = 'https://api.invertironline.com/api/v2/operar/rescate/fci'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    data = {
+        "simbolo": simbolo,
+        "cantidad": cantidad,
+        "soloValidar": solo_validar
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al rescatar FCI: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al rescatar FCI: {str(e)}")
+        return None
+
+def suscripcion_fci(token_portador, simbolo, monto, solo_validar=True):
+    """Realiza una suscripción a FCI"""
+    url = 'https://api.invertironline.com/api/v2/operar/suscripcion/fci'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    data = {
+        "simbolo": simbolo,
+        "monto": monto,
+        "soloValidar": solo_validar
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al suscribir FCI: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al suscribir FCI: {str(e)}")
+        return None
+
+# --- Funciones de operaciones Especie D ---
+
+def vender_especie_d(token_portador, mercado, simbolo, cantidad, precio, validez, id_cuenta_bancaria=0, tipo_orden="precioLimite", plazo="t0", id_fuente=0):
+    """Vende una especie D"""
+    url = 'https://api.invertironline.com/api/v2/operar/VenderEspecieD'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    data = {
+        "mercado": mercado,
+        "simbolo": simbolo,
+        "cantidad": cantidad,
+        "precio": precio,
+        "validez": validez,
+        "idCuentaBancaria": id_cuenta_bancaria,
+        "tipoOrden": tipo_orden,
+        "plazo": plazo,
+        "idFuente": id_fuente
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al vender especie D: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al vender especie D: {str(e)}")
+        return None
+
+def comprar_especie_d(token_portador, mercado, simbolo, cantidad, precio, plazo, validez, tipo_orden="precioLimite", monto=0, id_fuente=0):
+    """Compra una especie D"""
+    url = 'https://api.invertironline.com/api/v2/operar/ComprarEspecieD'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    data = {
+        "mercado": mercado,
+        "simbolo": simbolo,
+        "cantidad": cantidad,
+        "precio": precio,
+        "plazo": plazo,
+        "validez": validez,
+        "tipoOrden": tipo_orden,
+        "monto": monto,
+        "idFuente": id_fuente
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al comprar especie D: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al comprar especie D: {str(e)}")
+        return None
+
+# --- Funciones de operaciones para asesores ---
+
+def vender_especie_d_asesor(token_portador, id_cliente_asesorado, fondos_operacion, mercado, simbolo, cantidad, precio, validez, id_cuenta_bancaria=0, tipo_orden="precioLimite", plazo="t0", id_fuente=0):
+    """Vende una especie D para un cliente asesorado"""
+    url = 'https://api.invertironline.com/api/v2/asesores/operar/VenderEspecieD'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    data = {
+        "idClienteAsesorado": id_cliente_asesorado,
+        "fondosParaOperacion": fondos_operacion,
+        "mercado": mercado,
+        "simbolo": simbolo,
+        "cantidad": cantidad,
+        "precio": precio,
+        "validez": validez,
+        "idCuentaBancaria": id_cuenta_bancaria,
+        "tipoOrden": tipo_orden,
+        "plazo": plazo,
+        "idFuente": id_fuente
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al vender especie D para cliente {id_cliente_asesorado}: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al vender especie D para cliente {id_cliente_asesorado}: {str(e)}")
+        return None
+
+# --- Funciones de Operatoria Simplificada ---
+
+def obtener_montos_estimados(token_portador, monto):
+    """Obtiene montos estimados para operatoria simplificada"""
+    url = f'https://api.invertironline.com/api/v2/OperatoriaSimplificada/MontosEstimados/{monto}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener montos estimados: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al obtener montos estimados: {str(e)}")
+        return None
+
+def obtener_parametros_operatoria(token_portador, id_tipo_operatoria):
+    """Obtiene parámetros para un tipo de operatoria simplificada"""
+    url = f'https://api.invertironline.com/api/v2/OperatoriaSimplificada/{id_tipo_operatoria}/Parametros'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener parámetros de operatoria: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al obtener parámetros de operatoria: {str(e)}")
+        return None
+
+def validar_operatoria(token_portador, monto, id_tipo_operatoria):
+    """Valida una operatoria simplificada"""
+    url = f'https://api.invertironline.com/api/v2/OperatoriaSimplificada/Validar/{monto}/{id_tipo_operatoria}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al validar operatoria: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al validar operatoria: {str(e)}")
+        return None
+
+def obtener_montos_estimados_venta_mep(token_portador, monto):
+    """Obtiene montos estimados para venta MEP simplificada"""
+    url = f'https://api.invertironline.com/api/v2/OperatoriaSimplificada/VentaMepSimple/MontosEstimados/{monto}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener montos estimados venta MEP: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al obtener montos estimados venta MEP: {str(e)}")
+        return None
+
+def obtener_cotizaciones_mep(token_portador, simbolo, id_plazo_operatoria_compra, id_plazo_operatoria_venta):
+    """Obtiene cotizaciones MEP"""
+    url = 'https://api.invertironline.com/api/v2/Cotizaciones/MEP'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    data = {
+        "simbolo": simbolo,
+        "idPlazoOperatoriaCompra": id_plazo_operatoria_compra,
+        "idPlazoOperatoriaVenta": id_plazo_operatoria_venta
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener cotizaciones MEP: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al obtener cotizaciones MEP: {str(e)}")
+        return None
+
+def comprar_operatoria_simplificada(token_portador, monto, id_tipo_operatoria_simplificada, id_cuenta_bancaria=0):
+    """Realiza una compra con operatoria simplificada"""
+    url = 'https://api.invertironline.com/api/v2/OperatoriaSimplificada/Comprar'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    data = {
+        "monto": monto,
+        "idTipoOperatoriaSimplificada": id_tipo_operatoria_simplificada,
+        "idCuentaBancaria": id_cuenta_bancaria
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al comprar con operatoria simplificada: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al comprar con operatoria simplificada: {str(e)}")
+        return None
+
+# --- Funciones de Cotizaciones y Títulos ---
+
+def obtener_cotizacion_mep_simbolo(token_portador, simbolo):
+    """Obtiene cotización MEP para un símbolo específico"""
+    url = f'https://api.invertironline.com/api/v2/Cotizaciones/MEP/{simbolo}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener cotización MEP para {simbolo}: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al obtener cotización MEP para {simbolo}: {str(e)}")
+        return None
+
+def obtener_cotizacion_historica_mep(token_portador, simbolo, fecha_desde, fecha_hasta):
+    """Obtiene cotizaciones históricas MEP para un símbolo"""
+    url = f'https://api.invertironline.com/api/v2/{simbolo}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/false'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener cotizaciones históricas MEP para {simbolo}: {response.status_code}")
+            return []
+    except Exception as e:
+        st.error(f"Error al obtener cotizaciones históricas MEP para {simbolo}: {str(e)}")
+        return []
+
+def obtener_fci_lista(token_portador):
+    """Obtiene la lista de FCI disponibles"""
+    url = 'https://api.invertironline.com/api/v2/Titulos/FCI'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener lista de FCI: {response.status_code}")
+            return []
+    except Exception as e:
+        st.error(f"Error al obtener lista de FCI: {str(e)}")
+        return []
+
+def obtener_fci_detalle(token_portador, simbolo):
+    """Obtiene detalles de un FCI específico"""
+    url = f'https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener detalle del FCI {simbolo}: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al obtener detalle del FCI {simbolo}: {str(e)}")
+        return None
+
+def obtener_tipos_fondos(token_portador):
+    """Obtiene los tipos de fondos disponibles"""
+    url = 'https://api.invertironline.com/api/v2/Titulos/FCI/TipoFondos'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener tipos de fondos: {response.status_code}")
+            return []
+    except Exception as e:
+        st.error(f"Error al obtener tipos de fondos: {str(e)}")
+        return []
+
+def obtener_cotizacion_titulo(token_portador, mercado, simbolo):
+    """Obtiene cotización de un título específico"""
+    url = f'https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener cotización de {simbolo}: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al obtener cotización de {simbolo}: {str(e)}")
+        return None
+
+def obtener_cotizaciones_historica(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="false"):
+    """Obtiene cotizaciones históricas de un título"""
+    url = f'https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener cotizaciones históricas de {simbolo}: {response.status_code}")
+            return []
+    except Exception as e:
+        st.error(f"Error al obtener cotizaciones históricas de {simbolo}: {str(e)}")
+        return []
+
+def obtener_administradoras_fci(token_portador):
+    """Obtiene las administradoras de FCI disponibles"""
+    url = 'https://api.invertironline.com/api/v2/Titulos/FCI/Administradoras'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener administradoras de FCI: {response.status_code}")
+            return []
+    except Exception as e:
+        st.error(f"Error al obtener administradoras de FCI: {str(e)}")
+        return []
+
+def obtener_detalle_titulo(token_portador, mercado, simbolo):
+    """Obtiene detalles de un título específico"""
+    url = f'https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener detalle del título {simbolo}: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al obtener detalle del título {simbolo}: {str(e)}")
+        return None
+
+def obtener_opciones_titulo(token_portador, mercado, simbolo):
+    """Obtiene opciones de un título específico"""
+    url = f'https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Opciones'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener opciones del título {simbolo}: {response.status_code}")
+            return []
+    except Exception as e:
+        st.error(f"Error al obtener opciones del título {simbolo}: {str(e)}")
+        return []
+
+def obtener_instrumentos_pais(token_portador, pais, instrumento=None):
+    """Obtiene instrumentos por país"""
+    url = f'https://api.invertironline.com/api/v2/{pais}/Titulos/Cotizacion/Instrumentos'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    params = {}
+    
+    if instrumento:
+        params['instrumento'] = instrumento
+    
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener instrumentos del país {pais}: {response.status_code}")
+            return []
+    except Exception as e:
+        st.error(f"Error al obtener instrumentos del país {pais}: {str(e)}")
+        return []
+
+def obtener_cotizacion_detalle(token_portador, mercado, simbolo):
+    """Obtiene cotización detallada de un título"""
+    url = f'https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/CotizacionDetalle'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener cotización detallada de {simbolo}: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al obtener cotización detallada de {simbolo}: {str(e)}")
+        return None
+
+def obtener_administradoras_fci(token_portador):
+    """Obtiene las administradoras de FCI disponibles"""
+    url = 'https://api.invertironline.com/api/v2/Titulos/FCI/Administradoras'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener administradoras de FCI: {response.status_code}")
+            return []
+    except Exception as e:
+        st.error(f"Error al obtener administradoras de FCI: {str(e)}")
+        return []
+
+def obtener_detalle_titulo(token_portador, mercado, simbolo):
+    """Obtiene detalles de un título específico"""
+    url = f'https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener detalle del título {simbolo}: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error al obtener detalle del título {simbolo}: {str(e)}")
+        return None
+
+def obtener_opciones_titulo(token_portador, mercado, simbolo):
+    """Obtiene opciones de un título específico"""
+    url = f'https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Opciones'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener opciones del título {simbolo}: {response.status_code}")
+            return []
+    except Exception as e:
+        st.error(f"Error al obtener opciones del título {simbolo}: {str(e)}")
+        return []
+
+def obtener_instrumentos_por_pais(token_portador, pais):
+    """Obtiene instrumentos por país"""
+    url = f'https://api.invertironline.com/api/v2/{pais}/Titulos/Cotizacion/Instrumentos'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener instrumentos de {pais}: {response.status_code}")
+            return []
+    except Exception as e:
+        st.error(f"Error al obtener instrumentos de {pais}: {str(e)}")
+        return []
+
+# --- Funciones de Interfaz para Cotizaciones ---
+
+def mostrar_panel_cotizaciones(token_portador):
+    """Muestra el panel de cotizaciones y datos"""
+    st.markdown("### 💱 Panel de Cotizaciones y Datos")
+    
+    # Tabs para diferentes secciones
+    tab1, tab2, tab3, tab4 = st.tabs(["🇺🇸 Dólar MEP", "📊 FCI", "📈 Cotizaciones", "💰 Estado USD"])
+    
+    with tab1:
+        mostrar_cotizaciones_mep(token_portador)
+    
+    with tab2:
+        mostrar_panel_fci(token_portador)
+    
+    with tab3:
+        mostrar_cotizaciones_generales(token_portador)
+    
+    with tab4:
+        mostrar_estado_usd(token_portador)
+
+def mostrar_cotizaciones_mep(token_portador):
+    """Muestra cotizaciones del dólar MEP"""
+    st.markdown("#### 🇺🇸 Cotizaciones Dólar MEP")
+    
+    # Simbolos comunes para MEP
+    simbolos_mep = ["GGAL", "PAMP", "TXAR", "MIRG", "IRSA"]
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        simbolo_seleccionado = st.selectbox(
+            "Seleccionar símbolo MEP",
+            simbolos_mep,
+            help="Selecciona un símbolo para ver su cotización MEP"
+        )
+    
+    with col2:
+        if st.button("🔄 Actualizar Cotización", type="primary"):
+            st.rerun()
+    
+    # Obtener cotización actual
+    with st.spinner("Obteniendo cotización MEP..."):
+        cotizacion = obtener_cotizacion_mep_simbolo(token_portador, simbolo_seleccionado)
+    
+    if cotizacion:
+        st.success(f"✅ Cotización MEP {simbolo_seleccionado}: ${cotizacion:.2f}")
+        
+        # Mostrar gráfico histórico
+        st.markdown("#### 📈 Evolución Histórica")
+        
+        col_fecha1, col_fecha2 = st.columns(2)
+        with col_fecha1:
+            fecha_desde = st.date_input("Desde", value=date.today() - timedelta(days=30))
+        with col_fecha2:
+            fecha_hasta = st.date_input("Hasta", value=date.today())
+        
+        if st.button("📊 Generar Gráfico Histórico"):
+            with st.spinner("Obteniendo datos históricos..."):
+                datos_historicos = obtener_cotizaciones_historica(
+                    token_portador, "bCBA", simbolo_seleccionado, 
+                    fecha_desde.strftime('%Y-%m-%d'), 
+                    fecha_hasta.strftime('%Y-%m-%d')
+                )
+            
+            if datos_historicos:
+                df_historico = pd.DataFrame(datos_historicos)
+                if not df_historico.empty:
+                    fig = px.line(
+                        df_historico, 
+                        x='fecha', 
+                        y='ultimoPrecio',
+                        title=f"Evolución Histórica {simbolo_seleccionado}",
+                        labels={'ultimoPrecio': 'Precio ($)', 'fecha': 'Fecha'}
+                    )
+                    fig.update_layout(
+                        xaxis_title="Fecha",
+                        yaxis_title="Precio ($)",
+                        height=400
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.warning("No hay datos históricos disponibles para el período seleccionado")
+            else:
+                st.error("No se pudieron obtener los datos históricos")
+    else:
+        st.error("No se pudo obtener la cotización MEP")
+
+def mostrar_panel_fci(token_portador):
+    """Muestra panel de FCI"""
+    st.markdown("#### 📊 Fondos Comunes de Inversión")
+    
+    # Obtener lista de FCI
+    with st.spinner("Cargando FCI..."):
+        fci_lista = obtener_fci_lista(token_portador)
+    
+    if fci_lista:
+        # Filtros
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Filtrar por tipo de fondo
+            tipos_fondos = obtener_tipos_fondos(token_portador)
+            if tipos_fondos:
+                tipo_seleccionado = st.selectbox(
+                    "Filtrar por tipo de fondo",
+                    ["Todos"] + [tipo["nombre"] for tipo in tipos_fondos],
+                    help="Selecciona un tipo de fondo para filtrar"
+                )
+            else:
+                tipo_seleccionado = "Todos"
+        
+        with col2:
+            # Buscar FCI específico
+            simbolo_buscar = st.text_input("Buscar FCI por símbolo", placeholder="Ej: ALFA")
+        
+        # Filtrar FCI
+        fci_filtrados = fci_lista
+        if tipo_seleccionado != "Todos":
+            fci_filtrados = [fci for fci in fci_filtrados if fci.get("tipoFondo") == tipo_seleccionado.lower().replace(" ", "_")]
+        
+        if simbolo_buscar:
+            fci_filtrados = [fci for fci in fci_filtrados if simbolo_buscar.upper() in fci.get("simbolo", "").upper()]
+        
+        # Mostrar tabla de FCI
+        if fci_filtrados:
+            df_fci = pd.DataFrame(fci_filtrados)
+            
+            # Seleccionar columnas importantes
+            columnas_mostrar = ["simbolo", "descripcion", "ultimoOperado", "variacion", "variacionMensual", "tipoFondo"]
+            columnas_disponibles = [col for col in columnas_mostrar if col in df_fci.columns]
+            
+            if columnas_disponibles:
+                st.dataframe(
+                    df_fci[columnas_disponibles],
+                    use_container_width=True,
+                    height=400
+                )
+                
+                # Mostrar detalles de FCI seleccionado
+                st.markdown("#### 📋 Detalles del FCI")
+                simbolos_disponibles = df_fci["simbolo"].tolist()
+                fci_seleccionado = st.selectbox("Seleccionar FCI para ver detalles", simbolos_disponibles)
+                
+                if st.button("📊 Ver Detalles"):
+                    with st.spinner("Obteniendo detalles del FCI..."):
+                        detalle_fci = obtener_fci_detalle(token_portador, fci_seleccionado)
+                    
+                    if detalle_fci:
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.metric("💰 Último Operado", f"${detalle_fci.get('ultimoOperado', 0):.2f}")
+                            st.metric("📈 Variación Diaria", f"{detalle_fci.get('variacion', 0):.2f}%")
+                            st.metric("📊 Variación Mensual", f"{detalle_fci.get('variacionMensual', 0):.2f}%")
+                        
+                        with col2:
+                            st.metric("📅 Variación Anual", f"{detalle_fci.get('variacionAnual', 0):.2f}%")
+                            st.metric("💵 Monto Mínimo", f"${detalle_fci.get('montoMinimo', 0):.2f}")
+                            st.metric("⏰ Rescate", detalle_fci.get('rescate', 'N/A'))
+                        
+                        st.markdown(f"**Descripción:** {detalle_fci.get('descripcion', 'N/A')}")
+                        st.markdown(f"**Horizonte:** {detalle_fci.get('horizonteInversion', 'N/A')}")
+                        st.markdown(f"**Perfil Inversor:** {detalle_fci.get('perfilInversor', 'N/A')}")
+        else:
+            st.warning("No se encontraron FCI con los filtros aplicados")
+    else:
+        st.error("No se pudieron obtener los FCI")
+
+def mostrar_cotizaciones_generales(token_portador):
+    """Muestra cotizaciones generales"""
+    st.markdown("#### 📈 Cotizaciones Generales")
+    
+    # Simbolos populares
+    simbolos_populares = {
+        "Acciones": ["GGAL", "PAMP", "TXAR", "MIRG", "IRSA", "ALUA", "BBAR"],
+        "Bonos": ["GD30", "GD35", "AL30", "AE38", "AL35"],
+        "CEDEARs": ["AAPL", "GOOGL", "TSLA", "MSFT", "AMZN"]
+    }
+    
+    categoria = st.selectbox("Seleccionar categoría", list(simbolos_populares.keys()))
+    simbolo_seleccionado = st.selectbox("Seleccionar símbolo", simbolos_populares[categoria])
+    
+    mercado = "bCBA"  # Por defecto
+    
+    if st.button("📊 Obtener Cotización"):
+        with st.spinner("Obteniendo cotización..."):
+            cotizacion = obtener_cotizacion_titulo(token_portador, mercado, simbolo_seleccionado)
+        
+        if cotizacion:
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("💰 Último Precio", f"${cotizacion.get('ultimoPrecio', 0):.2f}")
+            with col2:
+                st.metric("📈 Variación", f"{cotizacion.get('variacion', 0):.2f}%")
+            with col3:
+                st.metric("📊 Volumen", f"{cotizacion.get('volumenNominal', 0):,.0f}")
+            
+            # Gráfico histórico
+            st.markdown("#### 📈 Evolución Histórica")
+            
+            col_fecha1, col_fecha2 = st.columns(2)
+            with col_fecha1:
+                fecha_desde = st.date_input("Desde", value=date.today() - timedelta(days=30), key="fecha_desde_gen")
+            with col_fecha2:
+                fecha_hasta = st.date_input("Hasta", value=date.today(), key="fecha_hasta_gen")
+            
+            if st.button("📊 Generar Gráfico"):
+                with st.spinner("Obteniendo datos históricos..."):
+                    datos_historicos = obtener_cotizaciones_historica(
+                        token_portador, mercado, simbolo_seleccionado,
+                        fecha_desde.strftime('%Y-%m-%d'),
+                        fecha_hasta.strftime('%Y-%m-%d')
+                    )
+                
+                if datos_historicos:
+                    df_historico = pd.DataFrame(datos_historicos)
+                    if not df_historico.empty:
+                        fig = px.line(
+                            df_historico,
+                            x='fecha',
+                            y='ultimoPrecio',
+                            title=f"Evolución Histórica {simbolo_seleccionado}",
+                            labels={'ultimoPrecio': 'Precio ($)', 'fecha': 'Fecha'}
+                        )
+                        fig.update_layout(
+                            xaxis_title="Fecha",
+                            yaxis_title="Precio ($)",
+                            height=400
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.warning("No hay datos históricos disponibles")
+                else:
+                    st.error("No se pudieron obtener los datos históricos")
+        else:
+            st.error("No se pudo obtener la cotización")
+
+def mostrar_estado_usd(token_portador):
+    """Muestra estado de cuenta en USD y botones de compra/venta"""
+    st.markdown("#### 💰 Estado de Cuenta USD")
+    
+    # Obtener estado de cuenta
+    with st.spinner("Obteniendo estado de cuenta..."):
+        estado_cuenta = obtener_estado_cuenta(token_portador)
+    
+    if estado_cuenta:
+        # Filtrar cuentas USD
+        cuentas_usd = []
+        if 'cuentas' in estado_cuenta:
+            cuentas_usd = [cuenta for cuenta in estado_cuenta['cuentas'] if cuenta.get('moneda') == 'dolar_Estadounidense']
+        
+        if cuentas_usd:
+            st.markdown("##### 💵 Cuentas en USD")
+            
+            for cuenta in cuentas_usd:
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("💵 Disponible", f"USD ${cuenta.get('disponible', 0):.2f}")
+                with col2:
+                    st.metric("📊 Comprometido", f"USD ${cuenta.get('comprometido', 0):.2f}")
+                with col3:
+                    st.metric("💰 Total", f"USD ${cuenta.get('total', 0):.2f}")
+                
+                st.markdown(f"**Tipo:** {cuenta.get('tipo', 'N/A')}")
+                st.markdown(f"**Estado:** {cuenta.get('estado', 'N/A')}")
+                st.markdown("---")
+            
+            # Botones de compra/venta USD
+            st.markdown("##### 🔄 Operaciones USD")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**💵 Comprar USD**")
+                with st.form("comprar_usd_form"):
+                    monto_compra = st.number_input("Monto en ARS", min_value=0.0, step=1000.0, key="monto_compra")
+                    simbolo_mep = st.selectbox("Símbolo MEP", ["GGAL", "PAMP", "TXAR", "MIRG"], key="simbolo_compra")
+                    
+                    if st.form_submit_button("💵 Comprar USD", type="primary"):
+                        st.success(f"✅ Orden de compra de USD por ${monto_compra:.2f} ARS enviada")
+                        # Aquí se implementaría la lógica de compra real
+            
+            with col2:
+                st.markdown("**💰 Vender USD**")
+                with st.form("vender_usd_form"):
+                    monto_venta = st.number_input("Monto en USD", min_value=0.0, step=1.0, key="monto_venta")
+                    simbolo_mep = st.selectbox("Símbolo MEP", ["GGAL", "PAMP", "TXAR", "MIRG"], key="simbolo_venta")
+                    
+                    if st.form_submit_button("💰 Vender USD", type="primary"):
+                        st.success(f"✅ Orden de venta de USD ${monto_venta:.2f} enviada")
+                        # Aquí se implementaría la lógica de venta real
+        else:
+            st.warning("No se encontraron cuentas en USD")
+    else:
+        st.error("No se pudo obtener el estado de cuenta")
 
 def calcular_valor_portafolio_historico(token_portador, operaciones, fecha_desde=None, fecha_hasta=None):
     """
@@ -296,12 +1688,12 @@ def calcular_valor_portafolio_historico(token_portador, operaciones, fecha_desde
     # Crear serie temporal del valor del portafolio
     if fecha_desde:
         fecha_inicio = pd.to_datetime(fecha_desde).date()
-    else:
+                    else:
         fecha_inicio = df_ops['fechaOrden'].min().date()
     
     if fecha_hasta:
         fecha_fin = pd.to_datetime(fecha_hasta).date()
-    else:
+            else:
         fecha_fin = datetime.now().date()
     
     fechas = pd.date_range(start=fecha_inicio, end=fecha_fin, freq='D')
@@ -313,7 +1705,7 @@ def calcular_valor_portafolio_historico(token_portador, operaciones, fecha_desde
             valores_hasta_fecha = df_flujo[df_flujo['fecha'] <= fecha]
             if not valores_hasta_fecha.empty:
                 valor = valores_hasta_fecha['valor_acumulado'].iloc[-1]
-            else:
+        else:
                 valor = 0
         else:
             valor = 0
@@ -503,14 +1895,14 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
                 
                 # Concentración
                 concentracion_pct = metricas['concentracion'] * 100
-                if metricas['concentracion'] < 0.3:
-                    concentracion_status = "🟢 Baja"
+            if metricas['concentracion'] < 0.3:
+                concentracion_status = "🟢 Baja"
                     concentracion_color = "green"
-                elif metricas['concentracion'] < 0.6:
-                    concentracion_status = "🟡 Media"
+            elif metricas['concentracion'] < 0.6:
+                concentracion_status = "🟡 Media"
                     concentracion_color = "orange"
-                else:
-                    concentracion_status = "🔴 Alta"
+            else:
+                concentracion_status = "🔴 Alta"
                     concentracion_color = "red"
                 
                 col_riesgo1.metric(
@@ -666,7 +2058,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
                     showlegend=False
                 )
                 st.plotly_chart(fig_bars, use_container_width=True)
-        
+            
         with tab_distribucion:
             # Histograma de distribución de valores
             if len(datos_activos) > 1:
@@ -694,10 +2086,10 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
                         labels={'y': 'Valor (AR$)'}
                     )
                     fig_box.update_layout(
-                        height=400,
+                                height=400,
                         yaxis_title="Valor del Activo (AR$)",
-                        showlegend=False
-                    )
+                                showlegend=False
+                            )
                     st.plotly_chart(fig_box, use_container_width=True)
         
         with tab_analisis:
@@ -774,6 +2166,240 @@ def mostrar_notificaciones(notificaciones):
             if notif.get('link'):
                 st.markdown(f"**Link:** [{notif.get('link')}]({notif.get('link')})")
 
+def mostrar_perfil_asesor(perfil_asesor):
+    """
+    Muestra el perfil del asesor
+    
+    Args:
+        perfil_asesor (dict): Datos del perfil del asesor
+    """
+    st.markdown("### 👨‍💼 Perfil del Asesor")
+    
+    if not perfil_asesor:
+        st.info("No hay datos del perfil del asesor disponibles")
+        return
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.metric("👤 Nombre", f"{perfil_asesor.get('nombre', 'N/A')} {perfil_asesor.get('apellido', 'N/A')}")
+        st.metric("🆔 DNI", perfil_asesor.get('dni', 'N/A'))
+        st.metric("🏦 Nº Cuenta", perfil_asesor.get('numeroCuenta', 'N/A'))
+    
+    with col2:
+        st.metric("📧 Email", perfil_asesor.get('email', 'N/A'))
+        st.metric("⚖️ Perfil Inversor", perfil_asesor.get('perfilInversor', 'N/A'))
+        st.metric("🔒 Estado Cuenta", "✅ Abierta" if perfil_asesor.get('cuentaAbierta') else "❌ Cerrada")
+    
+    # Información adicional
+    st.markdown("#### 📋 Información Adicional")
+    col3, col4 = st.columns(2)
+    
+    with col3:
+        st.markdown(f"**CUIT/CUIL:** {perfil_asesor.get('cuitCuil', 'N/A')}")
+        st.markdown(f"**Sexo:** {perfil_asesor.get('sexo', 'N/A')}")
+    
+    with col4:
+        st.markdown(f"**Actualizar DDJJ:** {'✅ Sí' if perfil_asesor.get('actualizarDDJJ') else '❌ No'}")
+        st.markdown(f"**Actualizar Test:** {'✅ Sí' if perfil_asesor.get('actualizarTestInversor') else '❌ No'}")
+        st.markdown(f"**Actualizar TyC:** {'✅ Sí' if perfil_asesor.get('actualizarTyC') else '❌ No'}")
+
+def mostrar_panel_test_inversor(token_portador, cliente_seleccionado=None):
+    """
+    Muestra el panel del test del inversor
+    
+    Args:
+        token_portador (str): Token de acceso
+        cliente_seleccionado (dict): Datos del cliente seleccionado (opcional)
+    """
+    st.markdown("### 📊 Test del Inversor")
+    
+    # Obtener test actual
+    with st.spinner("🔄 Cargando test del inversor..."):
+        test_actual = obtener_test_inversor(token_portador)
+    
+    if not test_actual:
+        st.warning("No se pudo obtener el test del inversor")
+        return
+    
+    # Mostrar test actual
+    st.markdown("#### 📋 Test Actual")
+    if isinstance(test_actual, dict):
+        # Mostrar perfil sugerido si existe
+        if 'perfilSugerido' in test_actual:
+            perfil = test_actual['perfilSugerido']
+            st.info(f"**Perfil Sugerido:** {perfil.get('nombre', 'N/A')}")
+            if 'detalle' in perfil:
+                st.write(f"**Detalle:** {perfil['detalle']}")
+        
+        # Mostrar composición del perfil si existe
+        if 'perfilSugerido' in test_actual and 'perfilComposiciones' in test_actual['perfilSugerido']:
+            composiciones = test_actual['perfilSugerido']['perfilComposiciones']
+            if composiciones:
+                st.markdown("**Composición Sugerida:**")
+                for comp in composiciones:
+                    st.write(f"- {comp.get('nombre', 'N/A')}: {comp.get('porcentaje', 0)}%")
+        
+        # Mostrar otras secciones del test
+        for key, value in test_actual.items():
+            if key != 'perfilSugerido':
+                if isinstance(value, dict) and 'pregunta' in value:
+                    st.markdown(f"**{value['pregunta']}**")
+                else:
+                    st.markdown(f"**{key}:** {value}")
+    else:
+        st.json(test_actual)
+    
+    # Formulario para nuevo test
+    st.markdown("#### ✏️ Actualizar Test")
+    
+    with st.form("test_inversor_form"):
+        st.markdown("**Complete el test del inversor:**")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Instrumentos invertidos anteriormente
+            instrumentos_anteriores = st.multiselect(
+                "Instrumentos invertidos anteriormente",
+                ["Acciones", "Bonos", "FCI", "Opciones", "Futuros", "Crypto"],
+                help="Selecciona los instrumentos en los que has invertido"
+            )
+            
+            # Plazo de inversión
+            plazo_inversion = st.selectbox(
+                "Plazo de inversión preferido",
+                ["Corto plazo (< 1 año)", "Mediano plazo (1-3 años)", "Largo plazo (> 3 años)"],
+                help="¿Cuánto tiempo planeas mantener tus inversiones?"
+            )
+            
+            # Edad
+            edad = st.selectbox(
+                "Rango de edad",
+                ["18-25", "26-35", "36-45", "46-55", "56-65", "65+"],
+                help="Selecciona tu rango de edad"
+            )
+            
+            # Objetivo de inversión
+            objetivo = st.selectbox(
+                "Objetivo de inversión",
+                ["Preservar capital", "Generar ingresos", "Crecimiento", "Especulación"],
+                help="¿Cuál es tu principal objetivo?"
+            )
+        
+        with col2:
+            # Niveles de conocimiento
+            conocimiento_acciones = st.selectbox(
+                "Conocimiento en Acciones",
+                ["Ninguno", "Básico", "Intermedio", "Avanzado"],
+                help="Nivel de conocimiento en acciones"
+            )
+            
+            conocimiento_bonos = st.selectbox(
+                "Conocimiento en Bonos",
+                ["Ninguno", "Básico", "Intermedio", "Avanzado"],
+                help="Nivel de conocimiento en bonos"
+            )
+            
+            conocimiento_fci = st.selectbox(
+                "Conocimiento en FCI",
+                ["Ninguno", "Básico", "Intermedio", "Avanzado"],
+                help="Nivel de conocimiento en fondos comunes de inversión"
+            )
+            
+            # Pólizas de seguro
+            polizas_seguro = st.selectbox(
+                "Pólizas de seguro",
+                ["Ninguna", "Vida", "Accidentes", "Vida y Accidentes"],
+                help="¿Qué pólizas de seguro tienes?"
+            )
+        
+        # Capacidad de ahorro y patrimonio
+        col3, col4 = st.columns(2)
+        
+        with col3:
+            capacidad_ahorro = st.selectbox(
+                "Capacidad de ahorro mensual",
+                ["< $50,000", "$50,000 - $100,000", "$100,000 - $200,000", "> $200,000"],
+                help="¿Cuánto puedes ahorrar mensualmente?"
+            )
+        
+        with col4:
+            patrimonio_porcentaje = st.selectbox(
+                "Porcentaje del patrimonio a invertir",
+                ["< 10%", "10-25%", "25-50%", "> 50%"],
+                help="¿Qué porcentaje de tu patrimonio estás dispuesto a invertir?"
+            )
+        
+        enviar_email = st.checkbox(
+            "Enviar resultados por email",
+            value=True,
+            help="Recibir los resultados del test por correo electrónico"
+        )
+        
+        # Botones de envío
+        col_btn1, col_btn2 = st.columns(2)
+        
+        with col_btn1:
+            enviar_asesor = st.form_submit_button("📤 Enviar Test del Asesor", type="primary")
+        
+        with col_btn2:
+            if cliente_seleccionado:
+                id_cliente = cliente_seleccionado.get('id', cliente_seleccionado.get('numeroCliente'))
+                enviar_cliente = st.form_submit_button(f"👤 Enviar Test para Cliente {id_cliente}")
+            else:
+                enviar_cliente = False
+                st.form_submit_button("👤 Enviar Test para Cliente", disabled=True)
+        
+        # Procesar envíos
+        if enviar_asesor:
+            # Preparar datos según la estructura de la API
+            datos_test = {
+                "enviarEmailCliente": enviar_email,
+                "instrumentosInvertidosAnteriormente": [1, 2, 3],  # IDs de ejemplo
+                "nivelesConocimientoInstrumentos": [1, 2, 3],  # IDs de ejemplo
+                "idPlazoElegido": 1,  # ID del plazo seleccionado
+                "idEdadElegida": 1,  # ID de la edad seleccionada
+                "idObjetivoInversionElegida": 1,  # ID del objetivo seleccionado
+                "idPolizaElegida": 1,  # ID de la póliza seleccionada
+                "idCapacidadAhorroElegida": 1,  # ID de la capacidad seleccionada
+                "idPorcentajePatrimonioDedicado": 1  # ID del porcentaje seleccionado
+            }
+            
+            resultado = enviar_test_inversor(token_portador, datos_test)
+            if resultado:
+                st.success("✅ Test del asesor enviado correctamente")
+                if 'perfilSugerido' in resultado:
+                    perfil = resultado['perfilSugerido']
+                    st.info(f"**Nuevo Perfil Sugerido:** {perfil.get('nombre', 'N/A')}")
+                st.rerun()
+            else:
+                st.error("❌ Error al enviar test del asesor")
+        
+        if enviar_cliente and cliente_seleccionado:
+            # Preparar datos según la estructura de la API
+            datos_test = {
+                "enviarEmailCliente": enviar_email,
+                "instrumentosInvertidosAnteriormente": [1, 2, 3],  # IDs de ejemplo
+                "nivelesConocimientoInstrumentos": [1, 2, 3],  # IDs de ejemplo
+                "idPlazoElegido": 1,  # ID del plazo seleccionado
+                "idEdadElegida": 1,  # ID de la edad seleccionada
+                "idObjetivoInversionElegida": 1,  # ID del objetivo seleccionado
+                "idPolizaElegida": 1,  # ID de la póliza seleccionada
+                "idCapacidadAhorroElegida": 1,  # ID de la capacidad seleccionada
+                "idPorcentajePatrimonioDedicado": 1  # ID del porcentaje seleccionado
+            }
+            
+            resultado = enviar_test_inversor_cliente(token_portador, id_cliente, datos_test)
+            if resultado:
+                st.success(f"✅ Test enviado correctamente para el cliente {id_cliente}")
+                if 'perfilSugerido' in resultado:
+                    perfil = resultado['perfilSugerido']
+                    st.info(f"**Nuevo Perfil Sugerido:** {perfil.get('nombre', 'N/A')}")
+                st.rerun()
+            else:
+                st.error(f"❌ Error al enviar test para el cliente {id_cliente}")
+
 def mostrar_estado_cuenta(estado_cuenta, es_eeuu=False):
     """
     Muestra el estado de cuenta, con soporte para cuentas filtradas de EEUU
@@ -784,7 +2410,7 @@ def mostrar_estado_cuenta(estado_cuenta, es_eeuu=False):
     """
     if es_eeuu:
         st.markdown("### 🇺🇸 Estado de Cuenta EEUU")
-    else:
+        else:
         st.markdown("### 💰 Estado de Cuenta")
     
     if not estado_cuenta:
@@ -800,6 +2426,7 @@ def mostrar_analisis_portafolio():
         return
 
     nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
+    id_cliente = cliente.get('id', cliente.get('numeroCliente'))
 
     st.title(f"Análisis de Portafolio - {nombre_cliente}")
     
@@ -902,7 +2529,7 @@ def main():
     
     # Configurar cache para mejor rendimiento
     if hasattr(st, 'cache_data'):
-        st.cache_data.clear()
+    st.cache_data.clear()
     
     # Header principal con gradiente
     st.markdown("""
@@ -936,17 +2563,17 @@ def main():
         contraseña = st.text_input("Contraseña", type="password", help="Tu contraseña de IOL")
         
         if st.button("🔑 Iniciar Sesión", type="primary"):
-            if usuario and contraseña:
+                    if usuario and contraseña:
                 with st.spinner("🔄 Autenticando..."):
                     token_acceso = autenticar_usuario(usuario, contraseña)
-                    if token_acceso:
-                        st.session_state.token_acceso = token_acceso
+                            if token_acceso:
+                                st.session_state.token_acceso = token_acceso
                         st.session_state.usuario_autenticado = True
                         st.success("✅ Autenticación exitosa!")
-                        st.rerun()
+                                st.rerun()
+                            else:
+                                st.error("❌ Error en la autenticación")
                     else:
-                        st.error("❌ Error en la autenticación")
-            else:
                 st.warning("⚠️ Por favor, ingresa usuario y contraseña")
         
         # Mostrar estado de conexión
@@ -955,10 +2582,10 @@ def main():
             
             # Botón para cerrar sesión
             if st.button("🚪 Cerrar Sesión"):
-                st.session_state.token_acceso = None
+                    st.session_state.token_acceso = None
                 st.session_state.usuario_autenticado = False
-                st.session_state.cliente_seleccionado = None
-                st.rerun()
+                    st.session_state.cliente_seleccionado = None
+                    st.rerun()
             
             # Configuración de fechas
             st.markdown("""
@@ -974,7 +2601,7 @@ def main():
             # Selección de cliente
             if st.session_state.token_acceso:
                 clientes = obtener_clientes(st.session_state.token_acceso)
-                if clientes:
+            if clientes:
                     nombres_clientes = [f"{c.get('apellidoYNombre', c.get('nombre', 'Cliente'))} - {c.get('numeroCliente', c.get('id', 'N/A'))}" for c in clientes]
                     cliente_seleccionado = st.selectbox("Selección de Cliente", nombres_clientes)
                     
@@ -997,9 +2624,9 @@ def main():
             
             opcion = st.selectbox(
                 "Seleccione una opción:",
-                ["🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨‍💼 Panel del Asesor"]
+                ["🏠 Inicio", "📊 Análisis de Portafolio", "💱 Panel de Cotizaciones", "💰 Tasas de Caución", "👨‍💼 Panel del Asesor"]
             )
-        
+
         # Navegación
         if opcion == "🏠 Inicio":
             st.markdown("### 🏠 Bienvenido al IOL Portfolio Analyzer")
@@ -1010,11 +2637,14 @@ def main():
                 mostrar_analisis_portafolio()
             else:
                 st.warning("⚠️ Por favor, selecciona un cliente primero")
-            
+        
+        elif opcion == "💱 Panel de Cotizaciones":
+            mostrar_panel_cotizaciones(st.session_state.token_acceso)
+        
         elif opcion == "💰 Tasas de Caución":
             st.markdown("### 💰 Tasas de Caución")
             st.info("Funcionalidad de tasas de caución en desarrollo...")
-            
+        
         elif opcion == "👨‍💼 Panel del Asesor":
             st.markdown("### 👨‍💼 Panel del Asesor")
             st.info("Funcionalidad del panel del asesor en desarrollo...")
@@ -1031,4 +2661,4 @@ def main():
     """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
-    main()
+    main() 
