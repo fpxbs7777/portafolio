@@ -4079,40 +4079,87 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
     
     # Mostrar información del cliente seleccionado
     if id_cliente:
-        st.markdown("#### 👤 Perfil del Cliente")
         cliente_info = st.session_state.get('cliente_seleccionado', {})
         
-        # Mostrar información básica en métricas
+        # Información del cliente con diseño mejorado
+        st.markdown("#### 👤 Perfil del Cliente")
+        
+        # Métricas principales del cliente
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
             nombre_completo = cliente_info.get('apellidoYNombre', cliente_info.get('nombre', 'Cliente'))
-            st.metric("Nombre", nombre_completo)
+            st.metric("👤 Cliente", nombre_completo)
         
         with col2:
             numero_cliente = cliente_info.get('numeroCliente', cliente_info.get('id', 'N/A'))
-            st.metric("ID Cliente", numero_cliente)
+            st.metric("🆔 ID Cliente", numero_cliente)
         
         with col3:
-            st.metric("Portafolio", portfolio_id.upper() if portfolio_id else "General")
+            numero_cuenta = cliente_info.get('numeroCuenta', 'N/A')
+            st.metric("🏦 Nº Cuenta", numero_cuenta)
         
         with col4:
-            # Mostrar estado del cliente si está disponible
-            estado = cliente_info.get('estado', 'Activo')
-            st.metric("Estado", estado)
+            st.metric("📊 Portafolio", portfolio_id.upper() if portfolio_id else "General")
         
-        # Mostrar información adicional disponible
+        # Estado de cuenta del cliente
+        st.markdown("#### 💰 Estado de Cuenta")
+        
+        # Métricas financieras principales
+        col_fin1, col_fin2, col_fin3, col_fin4 = st.columns(4)
+        
+        with col_fin1:
+            disponible_pesos = cliente_info.get('disponibleOperarPesos', 0)
+            st.metric(
+                "💵 Disponible ARS", 
+                f"AR$ {disponible_pesos:,.2f}",
+                help="Dinero disponible para operar en pesos argentinos"
+            )
+        
+        with col_fin2:
+            disponible_dolares = cliente_info.get('disponibleOperarDolares', 0)
+            st.metric(
+                "💲 Disponible USD", 
+                f"USD {disponible_dolares:,.2f}",
+                help="Dinero disponible para operar en dólares"
+            )
+        
+        with col_fin3:
+            total_portafolio = cliente_info.get('totalPortafolio', 0)
+            st.metric(
+                "📈 Total Portafolio", 
+                f"AR$ {total_portafolio:,.2f}",
+                help="Valor total del portafolio de inversiones"
+            )
+        
+        with col_fin4:
+            total_cuenta = cliente_info.get('totalCuentaValorizado', 0)
+            st.metric(
+                "💰 Total Cuenta", 
+                f"AR$ {total_cuenta:,.2f}",
+                help="Valor total de la cuenta valorizada"
+            )
+        
+        # Información adicional del cliente
+        st.markdown("#### 📋 Información Adicional")
+        
         info_adicional = []
         if cliente_info.get('email'):
-            info_adicional.append(f"📧 Email: {cliente_info.get('email')}")
+            info_adicional.append(f"📧 **Email:** {cliente_info.get('email')}")
         if cliente_info.get('telefono'):
-            info_adicional.append(f"📞 Teléfono: {cliente_info.get('telefono')}")
+            info_adicional.append(f"📞 **Teléfono:** {cliente_info.get('telefono')}")
         if cliente_info.get('direccion'):
-            info_adicional.append(f"🏠 Dirección: {cliente_info.get('direccion')}")
+            info_adicional.append(f"🏠 **Dirección:** {cliente_info.get('direccion')}")
         if cliente_info.get('fechaAlta'):
-            info_adicional.append(f"📅 Fecha Alta: {cliente_info.get('fechaAlta')}")
+            info_adicional.append(f"📅 **Fecha Alta:** {cliente_info.get('fechaAlta')}")
         if cliente_info.get('perfilInversor'):
-            info_adicional.append(f"🎯 Perfil: {cliente_info.get('perfilInversor')}")
+            perfil = cliente_info.get('perfilInversor')
+            color_perfil = {
+                'Conservador': '🟢',
+                'Moderado': '🟡', 
+                'Agresivo': '🔴'
+            }.get(perfil, '⚪')
+            info_adicional.append(f"🎯 **Perfil Inversor:** {color_perfil} {perfil}")
         
         if info_adicional:
             col_info1, col_info2 = st.columns(2)
@@ -4120,11 +4167,11 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
             
             with col_info1:
                 for info in info_adicional[:mitad]:
-                    st.info(info)
+                    st.markdown(f"• {info}")
             
             with col_info2:
                 for info in info_adicional[mitad:]:
-                    st.info(info)
+                    st.markdown(f"• {info}")
         
         # Debug: Mostrar todos los campos disponibles (solo en desarrollo)
         with st.expander("🔍 Información completa del cliente (Debug)"):
@@ -4257,12 +4304,34 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
         portafolio_dict = {row['Símbolo']: row for row in datos_activos}
         metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
         
-        # Información General
+        # Información General con diseño mejorado
+        st.markdown("#### 📊 Resumen General del Portafolio")
+        
         cols = st.columns(4)
-        cols[0].metric("Total de Activos", len(datos_activos))
-        cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
-        cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
-        cols[3].metric("Valor Total", f"${valor_total:,.2f}")
+        with cols[0]:
+            st.metric(
+                "📈 Total de Activos", 
+                len(datos_activos),
+                help="Cantidad total de activos en el portafolio"
+            )
+        with cols[1]:
+            st.metric(
+                "🔤 Símbolos Únicos", 
+                df_activos['Símbolo'].nunique(),
+                help="Número de símbolos diferentes en el portafolio"
+            )
+        with cols[2]:
+            st.metric(
+                "🏷️ Tipos de Activos", 
+                df_activos['Tipo'].nunique(),
+                help="Variedad de tipos de instrumentos"
+            )
+        with cols[3]:
+            st.metric(
+                "💰 Valor Total", 
+                f"AR$ {valor_total:,.2f}",
+                help="Valor total del portafolio en pesos argentinos"
+            )
         
         if metricas:
             # Métricas de Riesgo
@@ -7948,8 +8017,13 @@ def main():
     # Configurar cache para mejor rendimiento
     st.cache_data.clear()
     
-    st.title("📊 IOL Portfolio Analyzer")
-    st.markdown("### Analizador Avanzado de Portafolios IOL")
+    # Header principal con diseño mejorado
+    st.markdown("""
+    <div style="background: linear-gradient(90deg, #1f77b4 0%, #ff7f0e 100%); padding: 2rem; border-radius: 10px; margin-bottom: 2rem;">
+        <h1 style="color: white; text-align: center; margin: 0; font-size: 2.5rem;">📊 IOL Portfolio Analyzer</h1>
+        <p style="color: white; text-align: center; margin: 0.5rem 0 0 0; font-size: 1.2rem;">Analizador Avanzado de Portafolios IOL</p>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Inicializar session state
     if 'token_acceso' not in st.session_state:
@@ -7967,7 +8041,11 @@ def main():
     
     # Barra lateral - Autenticación
     with st.sidebar:
-        st.header("🔐 Autenticación IOL")
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 1.5rem; border-radius: 10px; margin-bottom: 1rem;">
+            <h3 style="color: white; text-align: center; margin: 0;">🔐 Autenticación IOL</h3>
+        </div>
+        """, unsafe_allow_html=True)
         
         if st.session_state.token_acceso is None:
             with st.form("login_form"):
@@ -8085,7 +8163,12 @@ def main():
     # Contenido principal
     try:
         if st.session_state.token_acceso:
-            st.sidebar.title("Menú Principal")
+            st.sidebar.markdown("""
+            <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); padding: 1.5rem; border-radius: 10px; margin: 1rem 0;">
+                <h3 style="color: white; text-align: center; margin: 0;">📋 Menú Principal</h3>
+            </div>
+            """, unsafe_allow_html=True)
+            
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
                 ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
