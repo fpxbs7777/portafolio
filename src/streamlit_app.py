@@ -1727,7 +1727,7 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                             serie = serie.sort_index()
                             
                             # Verificar que la serie tenga variación
-                        if serie.nunique() > 1:
+                            if serie.nunique() > 1:
                                 series_data[simbolo] = serie
                                 simbolos_exitosos.append(simbolo)
                                 serie_encontrada = True
@@ -1835,28 +1835,28 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                 df_precios_filled = df_precios.fillna(method='ffill').fillna(method='bfill')
                 
                 if not df_precios_filled.dropna().empty and len(df_precios_filled.dropna()) >= 30:
-                df_precios = df_precios_filled.dropna()
-                st.info("✅ Usando estrategia forward/backward fill")
+                    df_precios = df_precios_filled.dropna()
+                    st.info("✅ Usando estrategia forward/backward fill")
                 else:
                     # Estrategia 3: Interpolar valores faltantes
                     df_precios_interpolated = df_precios.interpolate(method='time')
                     
                     if not df_precios_interpolated.dropna().empty and len(df_precios_interpolated.dropna()) >= 30:
-                df_precios = df_precios_interpolated.dropna()
-                st.info("✅ Usando estrategia de interpolación")
-            else:
+                        df_precios = df_precios_interpolated.dropna()
+                        st.info("✅ Usando estrategia de interpolación")
+                    else:
                         # Estrategia 4: Usar cualquier dato disponible
-                df_precios = df_precios.dropna()
+                        df_precios = df_precios.dropna()
                         if df_precios.empty:
                             st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
                             return None, None, None
                         else:
                             st.warning(f"⚠️ Usando datos limitados: {len(df_precios)} observaciones")
-        
-        if df_precios.empty:
-            st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
-            return None, None, None
-        
+            
+            if df_precios.empty:
+                st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
+                return None, None, None
+                
         except Exception as e:
             st.error(f"❌ Error al alinear datos: {str(e)}")
             return None, None, None
