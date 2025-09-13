@@ -4023,13 +4023,13 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
             
             # Nivel de concentración con colores y descripción
             with col3:
-                if metricas['concentracion'] < 0.3:
+            if metricas['concentracion'] < 0.3:
                     nivel = "🟢 Baja"
                     descripcion = "Portafolio bien diversificado"
-                elif metricas['concentracion'] < 0.6:
+            elif metricas['concentracion'] < 0.6:
                     nivel = "🟡 Media"
                     descripcion = "Concentración moderada"
-                else:
+            else:
                     nivel = "🔴 Alta"
                     descripcion = "Alta concentración de riesgo"
                 
@@ -5219,14 +5219,16 @@ def mostrar_cotizaciones_mercado(token_acceso):
 
 
 
-def mostrar_analisis_tecnico(token_acceso, id_cliente):
+def mostrar_analisis_tecnico(token_acceso, id_cliente, portafolio_ar=None, portafolio_eeuu=None):
     st.markdown("### 📊 Análisis Técnico")
     
-    with st.spinner("Obteniendo portafolios..."):
-        # Obtener portafolio argentino
-        portafolio_ar = obtener_portafolio(token_acceso, id_cliente)
-        # Obtener portafolio estadounidense
-        portafolio_eeuu = obtener_portafolio_eeuu(token_acceso, id_cliente)
+    # Si no se pasan los portafolios, obtenerlos
+    if portafolio_ar is None or portafolio_eeuu is None:
+        with st.spinner("Obteniendo portafolios..."):
+            if portafolio_ar is None:
+                portafolio_ar = obtener_portafolio(token_acceso, id_cliente)
+            if portafolio_eeuu is None:
+                portafolio_eeuu = obtener_portafolio_eeuu(token_acceso, id_cliente)
     
     simbolos = []
     simbolos_info = {}  # Para almacenar información adicional de cada símbolo
@@ -5249,9 +5251,9 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
     if portafolio_eeuu:
         activos_eeuu = portafolio_eeuu.get('activos', [])
         for activo in activos_eeuu:
-            titulo = activo.get('titulo', {})
-            simbolo = titulo.get('simbolo', '')
-            if simbolo:
+        titulo = activo.get('titulo', {})
+        simbolo = titulo.get('simbolo', '')
+        if simbolo:
                 simbolos.append(f"🇺🇸 {simbolo}")
                 simbolos_info[f"🇺🇸 {simbolo}"] = {
                     'simbolo': simbolo,
@@ -5276,10 +5278,66 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
     pais = info_simbolo['pais']
     mercado = info_simbolo['mercado']
     
-    # Determinar si es un CEDEAR y ajustar el símbolo para TradingView
+    # Obtener información real del activo desde el portafolio
+    def obtener_tipo_activo_real(simbolo_limpio, portafolio_ar, portafolio_eeuu):
+        """Obtiene el tipo real de activo desde los datos de la API"""
+        # Buscar en portafolio argentino
+        if portafolio_ar:
+            activos_ar = portafolio_ar.get('activos', [])
+            for activo in activos_ar:
+                titulo = activo.get('titulo', {})
+                if titulo.get('simbolo') == simbolo_limpio:
+                    # Obtener información del tipo de activo
+                    tipo_titulo = titulo.get('tipo', '')
+                    descripcion = titulo.get('descripcion', '')
+                    mercado = titulo.get('mercado', '')
+                    
+                    # Determinar tipo basado en datos reales
+                    if 'AL30' in simbolo_limpio or 'GD30' in simbolo_limpio or 'BONO' in tipo_titulo.upper():
+                        return "Título Público (Bono)"
+                    elif 'CEDEAR' in tipo_titulo.upper() or 'CEDEAR' in descripcion.upper():
+                        return "CEDEAR"
+                    elif 'ACCION' in tipo_titulo.upper() or 'ACCION' in descripcion.upper():
+                        return "Acción Argentina"
+                    elif 'FCI' in tipo_titulo.upper() or 'FONDO' in descripcion.upper():
+                        return "Fondo Común de Inversión"
+                    elif 'ETF' in tipo_titulo.upper() or 'ETF' in descripcion.upper():
+                        return "ETF"
+                    else:
+                        return f"Activo ({tipo_titulo})" if tipo_titulo else "Activo Argentina"
+        
+        # Buscar en portafolio estadounidense
+        if portafolio_eeuu:
+            activos_eeuu = portafolio_eeuu.get('activos', [])
+            for activo in activos_eeuu:
+                titulo = activo.get('titulo', {})
+                if titulo.get('simbolo') == simbolo_limpio:
+                    tipo_titulo = titulo.get('tipo', '')
+                    descripcion = titulo.get('descripcion', '')
+                    
+                    if 'STOCK' in tipo_titulo.upper() or 'ACCION' in tipo_titulo.upper():
+                        return "Acción Internacional"
+                    elif 'ETF' in tipo_titulo.upper() or 'ETF' in descripcion.upper():
+                        return "ETF Internacional"
+                    elif 'BOND' in tipo_titulo.upper() or 'BONO' in tipo_titulo.upper():
+                        return "Bono Internacional"
+                    else:
+                        return f"Activo Internacional ({tipo_titulo})" if tipo_titulo else "Activo Internacional"
+        
+        # Fallback basado en patrones conocidos
+        if simbolo_limpio in ['AL30', 'GD30', 'AE38', 'AL35', 'GD35']:
+            return "Título Público (Bono)"
+        elif simbolo_limpio in ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA']:
+            return "CEDEAR"
+        else:
+            return "Activo"
+    
+    # Obtener tipo real del activo
+    tipo_activo = obtener_tipo_activo_real(simbolo_limpio, portafolio_ar, portafolio_eeuu)
+    
+    # Determinar si es un CEDEAR para TradingView
     def es_cedear(simbolo):
         """Identifica si un símbolo es un CEDEAR basado en patrones comunes"""
-        # Lista de CEDEARs conocidos (puede expandirse)
         cedears_conocidos = [
             'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'NFLX', 'AMD',
             'INTC', 'ORCL', 'CRM', 'ADBE', 'PYPL', 'UBER', 'LYFT', 'SNAP', 'TWTR',
@@ -5293,13 +5351,10 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
     # Preparar símbolo para TradingView
     if pais == 'Argentina' and es_cedear(simbolo_limpio):
         simbolo_tradingview = f"BCBA:{simbolo_limpio}"
-        tipo_activo = "CEDEAR"
     elif pais == 'Argentina':
         simbolo_tradingview = f"BCBA:{simbolo_limpio}"
-        tipo_activo = "Acción Argentina"
     else:
         simbolo_tradingview = simbolo_limpio
-        tipo_activo = "Acción Internacional"
     
     # Mostrar información del activo seleccionado
     col1, col2, col3, col4 = st.columns(4)
@@ -6974,7 +7029,7 @@ def obtener_datos_benchmark_argentino(benchmark, token_acceso, fecha_desde, fech
     try:
         if benchmark == 'Tasa_Caucion_Promedio':
             # Simular retornos de tasa de caución promedio
-            fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+                        fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
             retornos_simulados = np.random.normal(0.0003, 0.01, len(fechas))  # 0.03% diario promedio
             return pd.DataFrame({'Tasa_Caucion_Promedio': retornos_simulados}, index=fechas)
         
@@ -9172,7 +9227,7 @@ def mostrar_analisis_portafolio():
             st.warning("No se pudo obtener ningún portafolio para optimización")
     
     with tab5:
-        mostrar_analisis_tecnico(token_acceso, id_cliente)
+        mostrar_analisis_tecnico(token_acceso, id_cliente, portafolio_ar, portafolio_eeuu)
     
     with tab6:
         mostrar_cotizaciones_mercado(token_acceso)
