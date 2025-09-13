@@ -9746,62 +9746,68 @@ def crear_timeline_composicion(df_ops, portafolio_actual):
                         'precio': precio
                     })
             
-            # Calcular valor del portafolio en esta fecha
-            # Para el análisis histórico, usamos el flujo de efectivo acumulado
+            # Calcular valor del portafolio en esta fecha basado en posiciones actuales
             valor_total = 0
             composicion = {}
             
-            # Calcular flujo de efectivo acumulativo hasta esta fecha
-            flujo_acumulado = 0
-            if timeline:
-                # Comenzar con el flujo anterior, asegurar que sea válido
-                valor_anterior = timeline[-1]['valor_total']
-                if pd.notna(valor_anterior) and not np.isnan(valor_anterior):
-                    flujo_acumulado = float(valor_anterior)
-                else:
-                    flujo_acumulado = 0
-            
-            # Agregar el flujo de esta fecha
-            for _, op in ops_fecha.iterrows():
-                try:
-                    # Obtener valores seguros, manejar NaN y None
-                    cantidad = float(op['cantidadOperada']) if pd.notna(op['cantidadOperada']) else 0
-                    precio = float(op['precioOperado']) if pd.notna(op['precioOperado']) else 0
-                    
-                    if cantidad > 0 and precio > 0:
-                        monto = cantidad * precio
-                        
-                        if op['tipo'] == 'Compra':
-                            flujo_acumulado -= monto  # Salida de efectivo
-                        elif op['tipo'] == 'Venta':
-                            flujo_acumulado += monto  # Entrada de efectivo
-                except (ValueError, TypeError):
-                    # Si hay error en la conversión, continuar con la siguiente operación
-                    continue
-            
-            # Asegurar que valor_total sea válido
-            if pd.notna(flujo_acumulado) and not np.isnan(flujo_acumulado):
-                valor_total = float(flujo_acumulado)
-            else:
-                valor_total = 0
-            
-            # Crear composición básica basada en posiciones actuales
+            # Calcular valor total basado en posiciones actuales
             for simbolo, pos in posiciones_actuales.items():
                 if pos['cantidad'] > 0:  # Solo posiciones activas
-                    composicion[simbolo] = {
-                        'cantidad': pos['cantidad'],
-                        'precio_actual': 0,  # No usamos precios históricos
-                        'valor': 0,  # Valor se calculará proporcionalmente
-                        'peso': 0  # Se calculará después
-                    }
+                    # Obtener precio actual del símbolo
+                    precio_actual = obtener_precio_actual_simbolo(portafolio_actual, simbolo)
+                    if precio_actual and precio_actual > 0:
+                        valor_activo = pos['cantidad'] * precio_actual
+                        valor_total += valor_activo
+                        
+                        composicion[simbolo] = {
+                            'cantidad': pos['cantidad'],
+                            'precio_actual': precio_actual,
+                            'valor': valor_activo,
+                            'peso': 0  # Se calculará después
+                        }
             
-            # Calcular pesos (distribuir proporcionalmente por cantidad de activos)
-            num_activos = len(composicion)
-            if num_activos > 0:
-                peso_por_activo = 1.0 / num_activos if valor_total != 0 else 0
+            # Si no hay posiciones activas, usar flujo de efectivo simple
+            if valor_total == 0 and len(ops_fecha) > 0:
+                # Calcular flujo neto del día
+                flujo_dia = 0
+                for _, op in ops_fecha.iterrows():
+                    try:
+                        cantidad = float(op['cantidadOperada']) if pd.notna(op['cantidadOperada']) else 0
+                        precio = float(op['precioOperado']) if pd.notna(op['precioOperado']) else 0
+                        
+                        if cantidad > 0 and precio > 0:
+                            monto = cantidad * precio
+                            if op['tipo'] == 'Venta':
+                                flujo_dia += monto
+                            elif op['tipo'] == 'Compra':
+                                flujo_dia -= monto
+                    except (ValueError, TypeError):
+                        continue
+                
+                # Usar el valor anterior más el flujo del día
+                if timeline:
+                    valor_anterior = timeline[-1]['valor_total']
+                    if pd.notna(valor_anterior) and not np.isnan(valor_anterior):
+                        valor_total = float(valor_anterior) + flujo_dia
+                    else:
+                        valor_total = flujo_dia
+                else:
+                    valor_total = flujo_dia
+            
+            # Calcular pesos basados en valores reales
+            if valor_total > 0:
                 for simbolo in composicion:
-                    composicion[simbolo]['peso'] = peso_por_activo
-                    composicion[simbolo]['valor'] = valor_total * peso_por_activo if valor_total != 0 else 0
+                    if simbolo in composicion and 'valor' in composicion[simbolo]:
+                        composicion[simbolo]['peso'] = composicion[simbolo]['valor'] / valor_total
+                    else:
+                        composicion[simbolo]['peso'] = 0
+            else:
+                # Si no hay valor total, distribuir equitativamente
+                num_activos = len(composicion)
+                if num_activos > 0:
+                    peso_por_activo = 1.0 / num_activos
+                    for simbolo in composicion:
+                        composicion[simbolo]['peso'] = peso_por_activo
             
             # Debug: Mostrar información para fechas con operaciones
             if len(ops_fecha) > 0:
@@ -9882,8 +9888,8 @@ def calcular_indice_inteligente(timeline):
         
         df_timeline = pd.DataFrame(datos_timeline)
         
-        # Filtrar valores válidos
-        df_timeline = df_timeline[df_timeline['valor'] > 0]
+        # Filtrar valores válidos (no NaN, no infinitos)
+        df_timeline = df_timeline[pd.notna(df_timeline['valor']) & np.isfinite(df_timeline['valor'])]
         
         if len(df_timeline) == 0:
             st.warning("⚠️ No hay valores válidos en el timeline")
@@ -9897,7 +9903,7 @@ def calcular_indice_inteligente(timeline):
         
         # Calcular índice base 100
         valor_inicial = df_timeline['valor'].iloc[0]
-        if valor_inicial <= 0:
+        if pd.isna(valor_inicial) or not np.isfinite(valor_inicial):
             st.warning("⚠️ Valor inicial inválido para calcular índice")
             return None
         
