@@ -3154,12 +3154,12 @@ def dataframe_correlacion_beta(benchmark, position_security, hedge_universe, tok
         
         if token_portador and fecha_desde and fecha_hasta:
             # Usar datos de IOL si están disponibles
-            mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
+            df_precios, returns, simbolos_exitosos = get_historical_data_for_optimization(
                 token_portador, all_securities, fecha_desde, fecha_hasta
             )
             
-            if mean_returns is not None and cov_matrix is not None:
-                returns = df_precios.pct_change().dropna()
+            if returns is not None and not returns.empty:
+                return returns
             else:
                 # No hay fallback - solo usar IOL
                 st.error("No se pudieron obtener datos históricos de IOL")
@@ -3253,14 +3253,14 @@ class Coberturista:
             
             if self.token_portador and self.fecha_desde and self.fecha_hasta:
                 # Intentar con IOL primero
-                mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
+                df_precios, retornos, simbolos_exitosos = get_historical_data_for_optimization(
                     self.token_portador, all_securities, self.fecha_desde, self.fecha_hasta
                 )
                 
-                if mean_returns is not None and cov_matrix is not None:
-                    self.returns = df_precios.pct_change().dropna()
-                    self.mean_returns = mean_returns
-                    self.cov_matrix = cov_matrix
+                if df_precios is not None and retornos is not None and not retornos.empty:
+                    self.returns = retornos
+                    self.mean_returns = retornos.mean() * 252  # Anualizar
+                    self.cov_matrix = retornos.cov() * 252     # Anualizar
                     return True
             
             # No hay fallback - solo usar IOL
@@ -5674,15 +5674,15 @@ class PortfolioManager:
         Carga datos históricos para los símbolos del portafolio
         """
         try:
-            mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
+            df_precios, returns, simbolos_exitosos = get_historical_data_for_optimization(
                 self.token, self.symbols, self.fecha_desde, self.fecha_hasta
             )
             
-            if mean_returns is not None and cov_matrix is not None and df_precios is not None:
-                self.returns = df_precios.pct_change().dropna()
+            if returns is not None and not returns.empty and df_precios is not None:
+                self.returns = returns
                 self.prices = df_precios
-                self.mean_returns = mean_returns
-                self.cov_matrix = cov_matrix
+                self.mean_returns = returns.mean() * 252  # Anualizar
+                self.cov_matrix = returns.cov() * 252     # Anualizar
                 self.data_loaded = True
                 
                 # Crear manager para optimización avanzada
