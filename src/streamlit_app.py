@@ -1773,7 +1773,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
         cliente_info = st.session_state.get('cliente_seleccionado', {})
         
         # Dashboard compacto del cliente
-        st.markdown("### 👤 Dashboard del Cliente")
+        st.markdown("### 👤 Información del Cliente")
         
         # Primera fila: Información básica del cliente
         col_info1, col_info2, col_info3, col_info4 = st.columns(4)
@@ -1793,51 +1793,79 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
         with col_info4:
             st.metric("📊 Mercado", portfolio_id.upper() if portfolio_id else "General", help="Mercado del portafolio")
         
-        # Segunda fila: Estado financiero compacto
-        st.markdown("### 💰 Estado Financiero")
+        # Obtener datos financieros reales del estado de cuenta
+        estado_cuenta = obtener_estado_cuenta(token_portador)
         
-        col_fin1, col_fin2, col_fin3, col_fin4 = st.columns(4)
+        if estado_cuenta and 'cuentas' in estado_cuenta:
+            # Filtrar por moneda según el portafolio
+            moneda_filtro = "peso_Argentino" if portfolio_id.lower() == "ar" else "dolar_Estadounidense"
+            cuentas_filtradas = [c for c in estado_cuenta['cuentas'] if c.get('moneda') == moneda_filtro]
+            
+            if cuentas_filtradas:
+                cuenta = cuentas_filtradas[0]  # Tomar la primera cuenta del tipo
+                
+                # Segunda fila: Estado financiero real
+                st.markdown("### 💰 Estado Financiero del Asesor")
+                st.info("ℹ️ Los datos financieros mostrados corresponden al estado de cuenta del asesor autenticado")
+                
+                col_fin1, col_fin2, col_fin3, col_fin4 = st.columns(4)
+                
+                with col_fin1:
+                    disponible = cuenta.get('disponible', 0)
+                    st.metric("💵 Disponible", f"AR$ {disponible:,.2f}" if moneda_filtro == "peso_Argentino" else f"USD {disponible:,.2f}", help="Dinero disponible")
+                
+                with col_fin2:
+                    comprometido = cuenta.get('comprometido', 0)
+                    st.metric("🔒 Comprometido", f"AR$ {comprometido:,.2f}" if moneda_filtro == "peso_Argentino" else f"USD {comprometido:,.2f}", help="Dinero comprometido")
+                
+                with col_fin3:
+                    saldo = cuenta.get('saldo', 0)
+                    st.metric("💰 Saldo", f"AR$ {saldo:,.2f}" if moneda_filtro == "peso_Argentino" else f"USD {saldo:,.2f}", help="Saldo de la cuenta")
+                
+                with col_fin4:
+                    total = cuenta.get('total', 0)
+                    st.metric("📊 Total", f"AR$ {total:,.2f}" if moneda_filtro == "peso_Argentino" else f"USD {total:,.2f}", help="Total de la cuenta")
+            else:
+                st.warning(f"No se encontraron cuentas en {moneda_filtro}")
+        else:
+            st.warning("No se pudo obtener el estado de cuenta")
         
-        with col_fin1:
-            disponible_ars = cliente_info.get('disponibleOperarPesos', 0)
-            st.metric("💵 Disponible ARS", f"AR$ {disponible_ars:,.2f}", help="Dinero disponible en pesos")
-        
-        with col_fin2:
-            disponible_usd = cliente_info.get('disponibleOperarDolares', 0)
-            st.metric("💲 Disponible USD", f"USD {disponible_usd:,.2f}", help="Dinero disponible en dólares")
-        
-        with col_fin3:
-            total_portafolio = cliente_info.get('totalPortafolio', 0)
-            st.metric("📈 Total Portafolio", f"AR$ {total_portafolio:,.2f}", help="Valor total del portafolio")
-        
-        with col_fin4:
-            total_cuenta = cliente_info.get('totalCuentaValorizado', 0)
-            st.metric("💰 Total Cuenta", f"AR$ {total_cuenta:,.2f}", help="Valor total de la cuenta")
-        
-        # Gráfico compacto de estado financiero
-        fin_data = {
-            'Métrica': ['Disponible ARS', 'Disponible USD', 'Total Portafolio', 'Total Cuenta'],
-            'Valor': [disponible_ars, disponible_usd, total_portafolio, total_cuenta],
-            'Color': ['#2ecc71', '#3498db', '#e74c3c', '#f39c12']
-        }
-        
-        fig_fin = px.bar(
-            pd.DataFrame(fin_data),
-            x='Métrica',
-            y='Valor',
-            color='Métrica',
-            title="Resumen Financiero",
-            color_discrete_sequence=['#2ecc71', '#3498db', '#e74c3c', '#f39c12']
-        )
-        fig_fin.update_layout(
-            height=250,
-            showlegend=False,
-            xaxis_title="",
-            yaxis_title="Valor (AR$)",
-            margin=dict(l=0, r=0, t=40, b=0)
-        )
-        fig_fin.update_xaxes(tickangle=45)
-        st.plotly_chart(fig_fin, use_container_width=True, key=f"fig_fin_{portfolio_id}")
+        # Gráfico compacto de estado financiero (solo si tenemos datos del estado de cuenta)
+        if estado_cuenta and 'cuentas' in estado_cuenta:
+            moneda_filtro = "peso_Argentino" if portfolio_id.lower() == "ar" else "dolar_Estadounidense"
+            cuentas_filtradas = [c for c in estado_cuenta['cuentas'] if c.get('moneda') == moneda_filtro]
+            
+            if cuentas_filtradas:
+                cuenta = cuentas_filtradas[0]
+                
+                fin_data = {
+                    'Métrica': ['Disponible', 'Comprometido', 'Saldo', 'Total'],
+                    'Valor': [
+                        cuenta.get('disponible', 0),
+                        cuenta.get('comprometido', 0),
+                        cuenta.get('saldo', 0),
+                        cuenta.get('total', 0)
+                    ],
+                    'Color': ['#2ecc71', '#e74c3c', '#3498db', '#f39c12']
+                }
+                
+                fig_fin = px.bar(
+                    pd.DataFrame(fin_data),
+                    x='Métrica',
+                    y='Valor',
+                    color='Métrica',
+                    title=f"Resumen Financiero - {moneda_filtro}",
+                    color_discrete_sequence=['#2ecc71', '#e74c3c', '#3498db', '#f39c12']
+                )
+                fig_fin.update_layout(
+                    height=250,
+                    showlegend=False,
+                    xaxis_title="",
+                    yaxis_title=f"Valor ({'AR$' if moneda_filtro == 'peso_Argentino' else 'USD'})",
+                    margin=dict(l=0, r=0, t=40, b=0)
+                )
+                fig_fin.update_xaxes(tickangle=45)
+                st.plotly_chart(fig_fin, use_container_width=True, key=f"fig_fin_{portfolio_id}")
     
     activos = portafolio.get('activos', [])
     datos_activos = []
