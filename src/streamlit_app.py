@@ -2602,7 +2602,7 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
             return None
             
         try:
-        data = response.json()
+            data = response.json()
         except ValueError as e:
             print(f"Error al parsear respuesta JSON para FCI {simbolo}: {e}")
             return None
