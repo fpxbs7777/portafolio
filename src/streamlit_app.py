@@ -8039,6 +8039,262 @@ def obtener_movimientos_reales(access_token, fecha_desde=None, fecha_hasta=None)
         st.error(f'Error en la conexión: {e}')
         return None
 
+def calcular_evolucion_portafolio_unificada(token_acceso, id_cliente, fecha_desde=None, fecha_hasta=None):
+    """
+    Calcula la evolución unificada del portafolio basada en operaciones reales
+    Incluye composición, movimientos, retornos y riesgos reales
+    
+    Args:
+        token_acceso (str): Token de acceso
+        id_cliente (str): ID del cliente
+        fecha_desde (str): Fecha desde
+        fecha_hasta (str): Fecha hasta
+    
+    Returns:
+        dict: Datos unificados del portafolio
+    """
+    try:
+        # Obtener operaciones reales
+        operaciones = obtener_movimientos_reales(token_acceso, fecha_desde, fecha_hasta)
+        if not operaciones:
+            return None
+        
+        # Obtener portafolio actual
+        portafolio_actual = obtener_portafolio(token_acceso, id_cliente)
+        if not portafolio_actual:
+            return None
+        
+        # Procesar operaciones y crear timeline
+        df_ops = pd.DataFrame(operaciones)
+        df_ops['fechaOrden'] = pd.to_datetime(df_ops['fechaOrden'], format='mixed')
+        df_ops = df_ops.sort_values('fechaOrden')
+        
+        # Crear timeline de composición del portafolio
+        timeline_composicion = crear_timeline_composicion(df_ops, portafolio_actual)
+        
+        # Calcular índice inteligente del portafolio
+        indice_portafolio = calcular_indice_inteligente(timeline_composicion)
+        
+        # Calcular retornos y riesgos reales
+        metricas_reales = calcular_metricas_reales(timeline_composicion, indice_portafolio)
+        
+        return {
+            'operaciones': df_ops,
+            'timeline_composicion': timeline_composicion,
+            'indice_portafolio': indice_portafolio,
+            'metricas_reales': metricas_reales,
+            'portafolio_actual': portafolio_actual
+        }
+        
+    except Exception as e:
+        st.error(f"Error calculando evolución unificada: {e}")
+        return None
+
+def crear_timeline_composicion(df_ops, portafolio_actual):
+    """
+    Crea una línea de tiempo de la composición del portafolio basada en operaciones reales
+    """
+    try:
+        # Obtener fechas únicas de operaciones
+        fechas_ops = df_ops['fechaOrden'].dt.date.unique()
+        fechas_ops = sorted(fechas_ops)
+        
+        # Agregar fecha actual
+        fecha_actual = datetime.now().date()
+        if fecha_actual not in fechas_ops:
+            fechas_ops.append(fecha_actual)
+        
+        timeline = []
+        posiciones_actuales = {}
+        
+        for fecha in fechas_ops:
+            # Obtener operaciones de esta fecha
+            ops_fecha = df_ops[df_ops['fechaOrden'].dt.date == fecha]
+            
+            # Actualizar posiciones
+            for _, op in ops_fecha.iterrows():
+                simbolo = op['simbolo']
+                cantidad = op['cantidadOperada']
+                precio = op['precioOperado']
+                tipo = op['tipo']
+                
+                if simbolo not in posiciones_actuales:
+                    posiciones_actuales[simbolo] = {
+                        'cantidad': 0,
+                        'precio_promedio': 0,
+                        'valor_total': 0,
+                        'operaciones': []
+                    }
+                
+                if tipo == 'Compra':
+                    posiciones_actuales[simbolo]['cantidad'] += cantidad
+                    posiciones_actuales[simbolo]['operaciones'].append({
+                        'fecha': fecha,
+                        'tipo': 'Compra',
+                        'cantidad': cantidad,
+                        'precio': precio
+                    })
+                elif tipo == 'Venta':
+                    posiciones_actuales[simbolo]['cantidad'] -= cantidad
+                    posiciones_actuales[simbolo]['operaciones'].append({
+                        'fecha': fecha,
+                        'tipo': 'Venta',
+                        'cantidad': cantidad,
+                        'precio': precio
+                    })
+            
+            # Calcular valor del portafolio en esta fecha
+            valor_total = 0
+            composicion = {}
+            
+            for simbolo, pos in posiciones_actuales.items():
+                if pos['cantidad'] > 0:  # Solo posiciones activas
+                    # Obtener precio actual del portafolio actual
+                    precio_actual = obtener_precio_actual_simbolo(portafolio_actual, simbolo)
+                    if precio_actual:
+                        valor_posicion = pos['cantidad'] * precio_actual
+                        valor_total += valor_posicion
+                        composicion[simbolo] = {
+                            'cantidad': pos['cantidad'],
+                            'precio_actual': precio_actual,
+                            'valor': valor_posicion,
+                            'peso': 0  # Se calculará después
+                        }
+            
+            # Calcular pesos
+            for simbolo in composicion:
+                if valor_total > 0:
+                    composicion[simbolo]['peso'] = composicion[simbolo]['valor'] / valor_total
+            
+            timeline.append({
+                'fecha': fecha,
+                'valor_total': valor_total,
+                'composicion': composicion,
+                'num_operaciones': len(ops_fecha),
+                'operaciones_dia': ops_fecha.to_dict('records') if len(ops_fecha) > 0 else []
+            })
+        
+        return timeline
+        
+    except Exception as e:
+        st.error(f"Error creando timeline: {e}")
+        return []
+
+def calcular_indice_inteligente(timeline):
+    """
+    Calcula un índice inteligente del portafolio basado en la evolución real
+    """
+    try:
+        if not timeline:
+            return None
+        
+        # Crear DataFrame para cálculos
+        df_timeline = pd.DataFrame([
+            {
+                'fecha': t['fecha'],
+                'valor': t['valor_total'],
+                'num_ops': t['num_operaciones']
+            }
+            for t in timeline
+        ])
+        
+        # Calcular retornos diarios
+        df_timeline['retorno_diario'] = df_timeline['valor'].pct_change()
+        
+        # Calcular índice base 100
+        valor_inicial = df_timeline['valor'].iloc[0]
+        df_timeline['indice'] = (df_timeline['valor'] / valor_inicial) * 100
+        
+        # Calcular métricas del índice
+        retorno_total = (df_timeline['valor'].iloc[-1] / valor_inicial - 1) * 100
+        volatilidad = df_timeline['retorno_diario'].std() * np.sqrt(252) * 100
+        sharpe = (df_timeline['retorno_diario'].mean() * 252) / (df_timeline['retorno_diario'].std() * np.sqrt(252)) if df_timeline['retorno_diario'].std() > 0 else 0
+        
+        # Calcular drawdown máximo
+        df_timeline['cummax'] = df_timeline['valor'].cummax()
+        df_timeline['drawdown'] = (df_timeline['valor'] / df_timeline['cummax'] - 1) * 100
+        max_drawdown = df_timeline['drawdown'].min()
+        
+        return {
+            'data': df_timeline,
+            'retorno_total': retorno_total,
+            'volatilidad': volatilidad,
+            'sharpe': sharpe,
+            'max_drawdown': max_drawdown,
+            'valor_inicial': valor_inicial,
+            'valor_final': df_timeline['valor'].iloc[-1]
+        }
+        
+    except Exception as e:
+        st.error(f"Error calculando índice inteligente: {e}")
+        return None
+
+def calcular_metricas_reales(timeline, indice_portafolio):
+    """
+    Calcula métricas reales de retorno y riesgo basadas en operaciones
+    """
+    try:
+        if not timeline or not indice_portafolio:
+            return None
+        
+        # Análisis de operaciones
+        total_operaciones = sum(t['num_operaciones'] for t in timeline)
+        dias_con_operaciones = sum(1 for t in timeline if t['num_operaciones'] > 0)
+        
+        # Análisis de composición
+        simbolos_unicos = set()
+        for t in timeline:
+            simbolos_unicos.update(t['composicion'].keys())
+        
+        # Calcular concentración promedio
+        concentraciones = []
+        for t in timeline:
+            if t['composicion']:
+                pesos = [pos['peso'] for pos in t['composicion'].values()]
+                concentracion = sum(p**2 for p in pesos)  # Índice de Herfindahl
+                concentraciones.append(concentracion)
+        
+        concentracion_promedio = np.mean(concentraciones) if concentraciones else 0
+        
+        # Análisis de flujo de efectivo
+        flujo_total = 0
+        for t in timeline:
+            for op in t['operaciones_dia']:
+                if op['tipo'] == 'Compra':
+                    flujo_total -= op['cantidad'] * op['precio']
+                elif op['tipo'] == 'Venta':
+                    flujo_total += op['cantidad'] * op['precio']
+        
+        return {
+            'total_operaciones': total_operaciones,
+            'dias_con_operaciones': dias_con_operaciones,
+            'simbolos_unicos': len(simbolos_unicos),
+            'concentracion_promedio': concentracion_promedio,
+            'flujo_efectivo_neto': flujo_total,
+            'retorno_total': indice_portafolio['retorno_total'],
+            'volatilidad': indice_portafolio['volatilidad'],
+            'sharpe': indice_portafolio['sharpe'],
+            'max_drawdown': indice_portafolio['max_drawdown']
+        }
+        
+    except Exception as e:
+        st.error(f"Error calculando métricas reales: {e}")
+        return None
+
+def obtener_precio_actual_simbolo(portafolio_actual, simbolo):
+    """
+    Obtiene el precio actual de un símbolo desde el portafolio actual
+    """
+    try:
+        activos = portafolio_actual.get('activos', [])
+        for activo in activos:
+            titulo = activo.get('titulo', {})
+            if titulo.get('simbolo') == simbolo:
+                return activo.get('precioPromedio', 0)
+        return None
+    except:
+        return None
+
 def calcular_valor_portafolio_historico_streamlit(operaciones, fecha_desde=None, fecha_hasta=None):
     """
     Calcula el valor del portafolio a lo largo del tiempo basado en todas las operaciones históricas
@@ -8135,6 +8391,392 @@ def calcular_valor_portafolio_historico_streamlit(operaciones, fecha_desde=None,
     })
     
     return df_portafolio, posiciones, df_flujo
+
+def mostrar_analisis_unificado_mejorado(token_acceso, id_cliente):
+    """
+    Muestra el análisis unificado mejorado del portafolio con evolución real,
+    línea de tiempo, índice inteligente y métricas reales
+    """
+    st.title("📊 Análisis Unificado del Portafolio")
+    st.markdown("### 🔍 Evolución Real, Línea de Tiempo e Índice Inteligente")
+    
+    # Configuración de fechas
+    st.subheader("📅 Configuración del Período")
+    col1, col2 = st.columns(2)
+    with col1:
+        fecha_desde = st.date_input(
+            "Fecha desde", 
+            value=date.today() - timedelta(days=365),
+            help="Fecha de inicio del análisis"
+        )
+    with col2:
+        fecha_hasta = st.date_input(
+            "Fecha hasta", 
+            value=date.today(),
+            help="Fecha de fin del análisis"
+        )
+    
+    # Botón para calcular análisis unificado
+    if st.button("🚀 Calcular Análisis Unificado", type="primary"):
+        with st.spinner("Calculando evolución unificada del portafolio..."):
+            datos_unificados = calcular_evolucion_portafolio_unificada(
+                token_acceso, id_cliente, 
+                fecha_desde.strftime('%Y-%m-%d'), 
+                fecha_hasta.strftime('%Y-%m-%d')
+            )
+        
+        if datos_unificados:
+            mostrar_dashboard_unificado(datos_unificados)
+        else:
+            st.error("❌ No se pudo calcular el análisis unificado")
+
+def mostrar_dashboard_unificado(datos):
+    """
+    Muestra el dashboard unificado con todos los análisis mejorados
+    """
+    operaciones = datos['operaciones']
+    timeline = datos['timeline_composicion']
+    indice = datos['indice_portafolio']
+    metricas = datos['metricas_reales']
+    portafolio_actual = datos['portafolio_actual']
+    
+    # Métricas principales
+    st.subheader("📈 Métricas Principales del Portafolio")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric(
+            "💰 Valor Total",
+            f"${metricas['valor_final']:,.2f}",
+            delta=f"{metricas['retorno_total']:+.2f}%"
+        )
+    
+    with col2:
+        st.metric(
+            "📊 Retorno Total",
+            f"{metricas['retorno_total']:+.2f}%",
+            help="Retorno basado en operaciones reales"
+        )
+    
+    with col3:
+        st.metric(
+            "⚖️ Volatilidad",
+            f"{metricas['volatilidad']:.2f}%",
+            help="Volatilidad anualizada"
+        )
+    
+    with col4:
+        st.metric(
+            "📉 Max Drawdown",
+            f"{metricas['max_drawdown']:.2f}%",
+            help="Pérdida máxima desde pico"
+        )
+    
+    # Análisis de operaciones
+    st.subheader("📋 Análisis de Operaciones")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("🔄 Total Operaciones", metricas['total_operaciones'])
+    with col2:
+        st.metric("📅 Días con Operaciones", metricas['dias_con_operaciones'])
+    with col3:
+        st.metric("🏢 Símbolos Únicos", metricas['simbolos_unicos'])
+    with col4:
+        st.metric("💸 Flujo Neto", f"${metricas['flujo_efectivo_neto']:,.2f}")
+    
+    # Gráficos unificados
+    crear_graficos_unificados(timeline, indice, operaciones)
+    
+    # Análisis detallado
+    mostrar_analisis_detallado(timeline, operaciones)
+
+def crear_graficos_unificados(timeline, indice, operaciones):
+    """
+    Crea gráficos unificados que muestran evolución, composición y operaciones
+    """
+    st.subheader("📊 Gráficos Unificados")
+    
+    # Gráfico 1: Evolución del Índice del Portafolio
+    fig_indice = go.Figure()
+    
+    df_indice = indice['data']
+    fig_indice.add_trace(go.Scatter(
+        x=df_indice['fecha'],
+        y=df_indice['indice'],
+        mode='lines',
+        name='Índice del Portafolio',
+        line=dict(color='#1f77b4', width=3),
+        hovertemplate='<b>Fecha:</b> %{x}<br><b>Índice:</b> %{y:.2f}<br><b>Valor:</b> $%{customdata:,.2f}<extra></extra>',
+        customdata=df_indice['valor']
+    ))
+    
+    # Agregar operaciones como marcadores
+    fechas_ops = operaciones['fechaOrden'].dt.date
+    for fecha in fechas_ops.unique():
+        ops_fecha = operaciones[operaciones['fechaOrden'].dt.date == fecha]
+        valor_fecha = df_indice[df_indice['fecha'] == fecha]['valor'].iloc[0] if len(df_indice[df_indice['fecha'] == fecha]) > 0 else None
+        indice_fecha = df_indice[df_indice['fecha'] == fecha]['indice'].iloc[0] if len(df_indice[df_indice['fecha'] == fecha]) > 0 else None
+        
+        if valor_fecha and indice_fecha:
+            fig_indice.add_trace(go.Scatter(
+                x=[fecha],
+                y=[indice_fecha],
+                mode='markers',
+                name=f'Operaciones {fecha}',
+                marker=dict(
+                    size=10,
+                    color='red',
+                    symbol='diamond'
+                ),
+                hovertemplate=f'<b>Fecha:</b> {fecha}<br><b>Operaciones:</b> {len(ops_fecha)}<extra></extra>',
+                showlegend=False
+            ))
+    
+    fig_indice.update_layout(
+        title='📈 Evolución del Índice del Portafolio con Operaciones',
+        xaxis_title='Fecha',
+        yaxis_title='Índice (Base 100)',
+        hovermode='x unified',
+        height=500,
+        template='plotly_white'
+    )
+    
+    st.plotly_chart(fig_indice, use_container_width=True)
+    
+    # Gráfico 2: Evolución de la Composición
+    crear_grafico_composicion_evolutiva(timeline)
+    
+    # Gráfico 3: Análisis de Operaciones por Día
+    crear_grafico_operaciones_diarias(operaciones)
+
+def crear_grafico_composicion_evolutiva(timeline):
+    """
+    Crea gráfico de evolución de la composición del portafolio
+    """
+    # Preparar datos para gráfico de área apilada
+    fechas = [t['fecha'] for t in timeline]
+    simbolos = set()
+    for t in timeline:
+        simbolos.update(t['composicion'].keys())
+    
+    simbolos = sorted(list(simbolos))
+    
+    fig_composicion = go.Figure()
+    
+    for simbolo in simbolos:
+        valores = []
+        for t in timeline:
+            if simbolo in t['composicion']:
+                valores.append(t['composicion'][simbolo]['valor'])
+            else:
+                valores.append(0)
+        
+        fig_composicion.add_trace(go.Scatter(
+            x=fechas,
+            y=valores,
+            mode='lines',
+            fill='tonexty',
+            name=simbolo,
+            hovertemplate=f'<b>{simbolo}</b><br>Valor: $%{{y:,.2f}}<extra></extra>'
+        ))
+    
+    fig_composicion.update_layout(
+        title='📊 Evolución de la Composición del Portafolio',
+        xaxis_title='Fecha',
+        yaxis_title='Valor ($)',
+        hovermode='x unified',
+        height=400,
+        template='plotly_white'
+    )
+    
+    st.plotly_chart(fig_composicion, use_container_width=True)
+
+def crear_grafico_operaciones_diarias(operaciones):
+    """
+    Crea gráfico de operaciones por día
+    """
+    # Agrupar operaciones por día
+    ops_por_dia = operaciones.groupby(operaciones['fechaOrden'].dt.date).agg({
+        'cantidadOperada': 'sum',
+        'montoOperado': 'sum',
+        'simbolo': 'count'
+    }).reset_index()
+    
+    ops_por_dia.columns = ['fecha', 'cantidad_total', 'monto_total', 'num_operaciones']
+    
+    fig_ops = go.Figure()
+    
+    fig_ops.add_trace(go.Bar(
+        x=ops_por_dia['fecha'],
+        y=ops_por_dia['num_operaciones'],
+        name='Número de Operaciones',
+        marker_color='lightblue',
+        hovertemplate='<b>Fecha:</b> %{x}<br><b>Operaciones:</b> %{y}<br><b>Monto:</b> $%{customdata:,.2f}<extra></extra>',
+        customdata=ops_por_dia['monto_total']
+    ))
+    
+    fig_ops.update_layout(
+        title='📈 Operaciones por Día',
+        xaxis_title='Fecha',
+        yaxis_title='Número de Operaciones',
+        height=300,
+        template='plotly_white'
+    )
+    
+    st.plotly_chart(fig_ops, use_container_width=True)
+
+def mostrar_analisis_detallado(timeline, operaciones):
+    """
+    Muestra análisis detallado de la evolución del portafolio
+    """
+    st.subheader("🔍 Análisis Detallado")
+    
+    # Tabs para diferentes análisis
+    tab1, tab2, tab3 = st.tabs(["📊 Composición por Fecha", "🔄 Operaciones Detalladas", "📈 Métricas por Período"])
+    
+    with tab1:
+        mostrar_composicion_por_fecha(timeline)
+    
+    with tab2:
+        mostrar_operaciones_detalladas(operaciones)
+    
+    with tab3:
+        mostrar_metricas_por_periodo(timeline)
+
+def mostrar_composicion_por_fecha(timeline):
+    """
+    Muestra la composición del portafolio por fecha
+    """
+    st.markdown("#### 📊 Evolución de la Composición")
+    
+    # Selector de fecha
+    fechas_disponibles = [t['fecha'] for t in timeline if t['composicion']]
+    if fechas_disponibles:
+        fecha_seleccionada = st.selectbox(
+            "Seleccione una fecha:",
+            fechas_disponibles,
+            index=len(fechas_disponibles)-1
+        )
+        
+        # Mostrar composición para la fecha seleccionada
+        composicion_fecha = next(t['composicion'] for t in timeline if t['fecha'] == fecha_seleccionada)
+        
+        if composicion_fecha:
+            # Crear DataFrame para mostrar
+            df_composicion = pd.DataFrame([
+                {
+                    'Símbolo': simbolo,
+                    'Cantidad': pos['cantidad'],
+                    'Precio': f"${pos['precio_actual']:,.2f}",
+                    'Valor': f"${pos['valor']:,.2f}",
+                    'Peso': f"{pos['peso']*100:.2f}%"
+                }
+                for simbolo, pos in composicion_fecha.items()
+            ])
+            
+            st.dataframe(df_composicion, use_container_width=True)
+            
+            # Gráfico de torta
+            fig_torta = go.Figure(data=[go.Pie(
+                labels=list(composicion_fecha.keys()),
+                values=[pos['valor'] for pos in composicion_fecha.values()],
+                hovertemplate='<b>%{label}</b><br>Valor: $%{value:,.2f}<br>Peso: %{percent}<extra></extra>'
+            )])
+            
+            fig_torta.update_layout(
+                title=f'Composición del Portafolio - {fecha_seleccionada}',
+                height=400
+            )
+            
+            st.plotly_chart(fig_torta, use_container_width=True)
+
+def mostrar_operaciones_detalladas(operaciones):
+    """
+    Muestra operaciones detalladas
+    """
+    st.markdown("#### 🔄 Operaciones Detalladas")
+    
+    # Filtros
+    col1, col2 = st.columns(2)
+    with col1:
+        simbolos_unicos = operaciones['simbolo'].unique()
+        simbolo_filtro = st.selectbox("Filtrar por símbolo:", ["Todos"] + list(simbolos_unicos))
+    
+    with col2:
+        tipos_unicos = operaciones['tipo'].unique()
+        tipo_filtro = st.selectbox("Filtrar por tipo:", ["Todos"] + list(tipos_unicos))
+    
+    # Aplicar filtros
+    df_filtrado = operaciones.copy()
+    if simbolo_filtro != "Todos":
+        df_filtrado = df_filtrado[df_filtrado['simbolo'] == simbolo_filtro]
+    if tipo_filtro != "Todos":
+        df_filtrado = df_filtrado[df_filtrado['tipo'] == tipo_filtro]
+    
+    # Mostrar tabla
+    df_display = df_filtrado[['fechaOrden', 'simbolo', 'tipo', 'cantidadOperada', 'precioOperado', 'montoOperado']].copy()
+    df_display.columns = ['Fecha', 'Símbolo', 'Tipo', 'Cantidad', 'Precio', 'Monto']
+    df_display['Fecha'] = df_display['Fecha'].dt.strftime('%d/%m/%Y')
+    df_display['Precio'] = df_display['Precio'].apply(lambda x: f"${x:,.2f}")
+    df_display['Monto'] = df_display['Monto'].apply(lambda x: f"${x:,.2f}")
+    
+    st.dataframe(df_display, use_container_width=True, height=400)
+
+def mostrar_metricas_por_periodo(timeline):
+    """
+    Muestra métricas calculadas por período
+    """
+    st.markdown("#### 📈 Métricas por Período")
+    
+    # Calcular métricas por período
+    df_metricas = pd.DataFrame([
+        {
+            'Fecha': t['fecha'],
+            'Valor Total': t['valor_total'],
+            'Operaciones': t['num_operaciones'],
+            'Símbolos Activos': len(t['composicion'])
+        }
+        for t in timeline
+    ])
+    
+    # Calcular retornos
+    df_metricas['Retorno Diario'] = df_metricas['Valor Total'].pct_change() * 100
+    df_metricas['Retorno Acumulado'] = ((df_metricas['Valor Total'] / df_metricas['Valor Total'].iloc[0]) - 1) * 100
+    
+    # Mostrar métricas
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.metric("📊 Valor Inicial", f"${df_metricas['Valor Total'].iloc[0]:,.2f}")
+        st.metric("📈 Valor Final", f"${df_metricas['Valor Total'].iloc[-1]:,.2f}")
+        st.metric("🔄 Total Operaciones", df_metricas['Operaciones'].sum())
+    
+    with col2:
+        st.metric("📉 Retorno Total", f"{df_metricas['Retorno Acumulado'].iloc[-1]:+.2f}%")
+        st.metric("⚖️ Volatilidad Diaria", f"{df_metricas['Retorno Diario'].std():.2f}%")
+        st.metric("📅 Días Analizados", len(df_metricas))
+    
+    # Gráfico de métricas
+    fig_metricas = go.Figure()
+    
+    fig_metricas.add_trace(go.Scatter(
+        x=df_metricas['Fecha'],
+        y=df_metricas['Retorno Acumulado'],
+        mode='lines',
+        name='Retorno Acumulado',
+        line=dict(color='green', width=2)
+    ))
+    
+    fig_metricas.update_layout(
+        title='📈 Retorno Acumulado del Portafolio',
+        xaxis_title='Fecha',
+        yaxis_title='Retorno Acumulado (%)',
+        height=400,
+        template='plotly_white'
+    )
+    
+    st.plotly_chart(fig_metricas, use_container_width=True)
 
 def mostrar_operaciones_reales():
     """
@@ -8413,14 +9055,15 @@ def mostrar_analisis_portafolio():
         portafolio_ar, portafolio_eeuu, estado_cuenta_ar, estado_cuenta_eeuu = cargar_datos_cliente(token_acceso, id_cliente)
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "🇦🇷 Portafolio Argentina", 
         "🇺🇸 Portafolio EEUU",
         "💰 Estado de Cuenta", 
         "🎯 Optimización y Cobertura",
         "📊 Análisis Técnico",
         "💱 Dólares y Mercado",
-        "📈 Operaciones Reales"
+        "📈 Operaciones Reales",
+        "🔍 Análisis Unificado"
     ])
 
     with tab1:
@@ -8554,6 +9197,13 @@ def mostrar_analisis_portafolio():
             mostrar_resumen_operaciones_reales(portafolio_seleccionado[1], token_acceso, "operaciones_reales")
         else:
             st.warning("⚠️ No hay datos disponibles para el portafolio seleccionado")
+    
+    with tab8:
+        st.subheader("🔍 Análisis Unificado del Portafolio")
+        st.info("🚀 Esta sección proporciona un análisis unificado que indexa correctamente la evolución real de la composición del portafolio, movimientos de compra/venta, línea de tiempo e índice inteligente con retornos y riesgos reales.")
+        
+        # Mostrar análisis unificado mejorado
+        mostrar_analisis_unificado_mejorado(token_acceso, id_cliente)
 
 def main():
     # Configuración de rendimiento
