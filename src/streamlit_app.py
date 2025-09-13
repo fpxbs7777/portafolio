@@ -1671,6 +1671,8 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         st.info(f"🔍 Buscando datos históricos desde {fecha_desde_str} hasta {fecha_hasta_str}")
         
         # Procesar cada símbolo
+        series_data = {}  # Almacenar todas las series primero
+        
         for idx, simbolo in enumerate(simbolos):
             progress_bar.progress((idx + 1) / total_simbolos, text=f"Procesando {simbolo}...")
             
@@ -1724,7 +1726,7 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                             
                             # Verificar que la serie tenga variación
                             if serie.nunique() > 1:
-                                df_precios[simbolo] = serie
+                                series_data[simbolo] = serie
                                 simbolos_exitosos.append(simbolo)
                                 serie_encontrada = True
                                 mercado_encontrado = mercado
@@ -1742,6 +1744,12 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                 simbolos_fallidos.append(simbolo)
                 mercado_sugerido = simbolo_mercado_map.get(simbolo, "desconocido")
                 detalles_errores[simbolo] = f"No encontrado en ningún mercado (sugerido: {mercado_sugerido})"
+        
+        # Crear DataFrame con todas las series alineadas
+        if series_data:
+            df_precios = pd.DataFrame(series_data)
+            # Eliminar filas con todos los valores NaN
+            df_precios = df_precios.dropna(how='all')
         
         # Limpiar barra de progreso
         progress_bar.empty()
@@ -1804,6 +1812,16 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         
         # Intentar diferentes estrategias de alineación
         try:
+            if df_precios.empty:
+                st.error("❌ No se obtuvieron datos históricos para ningún activo")
+                return None, None, None
+            
+            # Mostrar información de debug sobre las fechas
+            with st.expander("🔍 Debug - Información de fechas"):
+                for col in df_precios.columns:
+                    serie = df_precios[col]
+                    st.text(f"{col}: {len(serie)} puntos, desde {serie.index.min()} hasta {serie.index.max()}")
+            
             # Estrategia 1: Solo fechas con datos completos (más conservadora)
             df_precios_completos = df_precios.dropna()
             
