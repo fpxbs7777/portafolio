@@ -9754,21 +9754,36 @@ def crear_timeline_composicion(df_ops, portafolio_actual):
             # Calcular flujo de efectivo acumulativo hasta esta fecha
             flujo_acumulado = 0
             if timeline:
-                # Comenzar con el flujo anterior
-                flujo_acumulado = timeline[-1]['valor_total']
+                # Comenzar con el flujo anterior, asegurar que sea válido
+                valor_anterior = timeline[-1]['valor_total']
+                if pd.notna(valor_anterior) and not np.isnan(valor_anterior):
+                    flujo_acumulado = float(valor_anterior)
+                else:
+                    flujo_acumulado = 0
             
             # Agregar el flujo de esta fecha
             for _, op in ops_fecha.iterrows():
-                if op['tipo'] == 'Compra':
-                    # Calcular monto usando precio y cantidad
-                    monto = op['cantidadOperada'] * op['precioOperado']
-                    flujo_acumulado -= monto  # Salida de efectivo
-                elif op['tipo'] == 'Venta':
-                    # Calcular monto usando precio y cantidad
-                    monto = op['cantidadOperada'] * op['precioOperado']
-                    flujo_acumulado += monto  # Entrada de efectivo
+                try:
+                    # Obtener valores seguros, manejar NaN y None
+                    cantidad = float(op['cantidadOperada']) if pd.notna(op['cantidadOperada']) else 0
+                    precio = float(op['precioOperado']) if pd.notna(op['precioOperado']) else 0
+                    
+                    if cantidad > 0 and precio > 0:
+                        monto = cantidad * precio
+                        
+                        if op['tipo'] == 'Compra':
+                            flujo_acumulado -= monto  # Salida de efectivo
+                        elif op['tipo'] == 'Venta':
+                            flujo_acumulado += monto  # Entrada de efectivo
+                except (ValueError, TypeError):
+                    # Si hay error en la conversión, continuar con la siguiente operación
+                    continue
             
-            valor_total = flujo_acumulado
+            # Asegurar que valor_total sea válido
+            if pd.notna(flujo_acumulado) and not np.isnan(flujo_acumulado):
+                valor_total = float(flujo_acumulado)
+            else:
+                valor_total = 0
             
             # Crear composición básica basada en posiciones actuales
             for simbolo, pos in posiciones_actuales.items():
@@ -10145,11 +10160,16 @@ def mostrar_dashboard_unificado(datos):
     """
     Muestra el dashboard unificado con todos los análisis mejorados
     """
-    operaciones = datos['operaciones']
-    timeline = datos['timeline_composicion']
-    indice = datos['indice_portafolio']
-    metricas = datos['metricas_reales']
-    portafolio_actual = datos['portafolio_actual']
+    operaciones = datos.get('operaciones')
+    timeline = datos.get('timeline_composicion')
+    indice = datos.get('indice_portafolio')
+    metricas = datos.get('metricas_reales')
+    portafolio_actual = datos.get('portafolio_actual')
+    
+    # Validar que tenemos datos válidos
+    if metricas is None:
+        st.error("❌ No se pudieron calcular las métricas del portafolio")
+        return
     
     # Métricas principales
     st.subheader("📈 Métricas Principales del Portafolio")
