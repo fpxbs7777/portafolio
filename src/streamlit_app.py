@@ -9747,7 +9747,7 @@ def crear_timeline_composicion(df_ops, portafolio_actual):
                 if pos['cantidad'] > 0:  # Solo posiciones activas
                     # Obtener precio actual del portafolio actual
                     precio_actual = obtener_precio_actual_simbolo(portafolio_actual, simbolo)
-                    if precio_actual:
+                    if precio_actual and precio_actual > 0:
                         valor_posicion = pos['cantidad'] * precio_actual
                         valor_total += valor_posicion
                         composicion[simbolo] = {
@@ -9761,6 +9761,10 @@ def crear_timeline_composicion(df_ops, portafolio_actual):
             for simbolo in composicion:
                 if valor_total > 0:
                     composicion[simbolo]['peso'] = composicion[simbolo]['valor'] / valor_total
+            
+            # Debug: Mostrar información para fechas con operaciones
+            if len(ops_fecha) > 0:
+                st.info(f"📅 {fecha}: {len(ops_fecha)} operaciones, valor total: ${valor_total:,.2f}, {len(composicion)} activos")
             
             timeline.append({
                 'fecha': fecha,
@@ -9776,40 +9780,94 @@ def crear_timeline_composicion(df_ops, portafolio_actual):
         st.error(f"Error creando timeline: {e}")
         return []
 
+def obtener_precio_actual_simbolo(portafolio_actual, simbolo):
+    """
+    Obtiene el precio actual de un símbolo desde el portafolio actual
+    """
+    try:
+        if not portafolio_actual or 'activos' not in portafolio_actual:
+            return None
+        
+        for activo in portafolio_actual['activos']:
+            if activo.get('simbolo') == simbolo:
+                # Buscar precio en diferentes campos posibles
+                precio = activo.get('precio', activo.get('precioActual', activo.get('ultimoPrecio')))
+                if precio and precio > 0:
+                    return precio
+                # Si no hay precio, calcular desde valor y cantidad
+                valor = activo.get('valor', activo.get('valorActual'))
+                cantidad = activo.get('cantidad', activo.get('cantidadNominal'))
+                if valor and cantidad and cantidad > 0:
+                    return valor / cantidad
+        return None
+    except Exception:
+        return None
+
 def calcular_indice_inteligente(timeline):
     """
     Calcula un índice inteligente del portafolio basado en la evolución real
     """
     try:
         if not timeline:
+            st.warning("⚠️ Timeline vacío para calcular índice inteligente")
             return None
         
         # Crear DataFrame para cálculos
-        df_timeline = pd.DataFrame([
-            {
-                'fecha': t['fecha'],
-                'valor': t['valor_total'],
-                'num_ops': t['num_operaciones']
-            }
-            for t in timeline
-        ])
+        datos_timeline = []
+        for t in timeline:
+            if 'fecha' in t and 'valor_total' in t:
+                datos_timeline.append({
+                    'fecha': t['fecha'],
+                    'valor': t.get('valor_total', 0),
+                    'num_ops': t.get('num_operaciones', 0)
+                })
+        
+        if not datos_timeline:
+            st.warning("⚠️ No hay datos válidos en el timeline para calcular índice")
+            return None
+        
+        df_timeline = pd.DataFrame(datos_timeline)
+        
+        # Filtrar valores válidos
+        df_timeline = df_timeline[df_timeline['valor'] > 0]
+        
+        if len(df_timeline) == 0:
+            st.warning("⚠️ No hay valores válidos en el timeline")
+            return None
+        
+        # Ordenar por fecha
+        df_timeline = df_timeline.sort_values('fecha').reset_index(drop=True)
         
         # Calcular retornos diarios
         df_timeline['retorno_diario'] = df_timeline['valor'].pct_change()
         
         # Calcular índice base 100
         valor_inicial = df_timeline['valor'].iloc[0]
+        if valor_inicial <= 0:
+            st.warning("⚠️ Valor inicial inválido para calcular índice")
+            return None
+        
         df_timeline['indice'] = (df_timeline['valor'] / valor_inicial) * 100
         
         # Calcular métricas del índice
-        retorno_total = (df_timeline['valor'].iloc[-1] / valor_inicial - 1) * 100
-        volatilidad = df_timeline['retorno_diario'].std() * np.sqrt(252) * 100
-        sharpe = (df_timeline['retorno_diario'].mean() * 252) / (df_timeline['retorno_diario'].std() * np.sqrt(252)) if df_timeline['retorno_diario'].std() > 0 else 0
+        valor_final = df_timeline['valor'].iloc[-1]
+        retorno_total = (valor_final / valor_inicial - 1) * 100
+        
+        # Calcular volatilidad solo si hay suficientes datos
+        if len(df_timeline) > 1:
+            volatilidad = df_timeline['retorno_diario'].std() * np.sqrt(252) * 100
+            sharpe = (df_timeline['retorno_diario'].mean() * 252) / (df_timeline['retorno_diario'].std() * np.sqrt(252)) if df_timeline['retorno_diario'].std() > 0 else 0
+        else:
+            volatilidad = 0
+            sharpe = 0
         
         # Calcular drawdown máximo
         df_timeline['cummax'] = df_timeline['valor'].cummax()
         df_timeline['drawdown'] = (df_timeline['valor'] / df_timeline['cummax'] - 1) * 100
         max_drawdown = df_timeline['drawdown'].min()
+        
+        # Debug: Mostrar información del índice calculado
+        st.info(f"📊 Índice calculado: {len(df_timeline)} puntos, valor inicial: ${valor_inicial:,.2f}, valor final: ${valor_final:,.2f}")
         
         return {
             'data': df_timeline,
@@ -9818,11 +9876,13 @@ def calcular_indice_inteligente(timeline):
             'sharpe': sharpe,
             'max_drawdown': max_drawdown,
             'valor_inicial': valor_inicial,
-            'valor_final': df_timeline['valor'].iloc[-1]
+            'valor_final': valor_final
         }
         
     except Exception as e:
         st.error(f"Error calculando índice inteligente: {e}")
+        import traceback
+        st.error(f"Traceback: {traceback.format_exc()}")
         return None
 
 def calcular_metricas_reales(timeline, indice_portafolio):
@@ -10095,89 +10155,133 @@ def crear_graficos_unificados(timeline, indice, operaciones):
     """
     st.subheader("📊 Gráficos Unificados")
     
-    # Gráfico 1: Evolución del Índice del Portafolio
-    fig_indice = go.Figure()
-    
-    df_indice = indice['data']
-    fig_indice.add_trace(go.Scatter(
-        x=df_indice['fecha'],
-        y=df_indice['indice'],
-        mode='lines',
-        name='Índice del Portafolio',
-        line=dict(color='#1f77b4', width=3),
-        hovertemplate='<b>Fecha:</b> %{x}<br><b>Índice:</b> %{y:.2f}<br><b>Valor:</b> $%{customdata:,.2f}<extra></extra>',
-        customdata=df_indice['valor']
-    ))
-    
-    # Agregar operaciones como marcadores
-    fechas_ops = operaciones['fechaOrden'].dt.date
-    for fecha in fechas_ops.unique():
-        ops_fecha = operaciones[operaciones['fechaOrden'].dt.date == fecha]
-        valor_fecha = df_indice[df_indice['fecha'] == fecha]['valor'].iloc[0] if len(df_indice[df_indice['fecha'] == fecha]) > 0 else None
-        indice_fecha = df_indice[df_indice['fecha'] == fecha]['indice'].iloc[0] if len(df_indice[df_indice['fecha'] == fecha]) > 0 else None
+    # Debug: Mostrar información de los datos recibidos
+    with st.expander("🔍 Debug - Información de Datos", expanded=False):
+        st.write(f"Timeline: {len(timeline) if timeline else 0} entradas")
+        st.write(f"Índice: {type(indice)} - {'data' in indice if isinstance(indice, dict) else 'No es dict'}")
+        st.write(f"Operaciones: {len(operaciones) if operaciones is not None else 0} registros")
         
-        if valor_fecha and indice_fecha:
+        if timeline:
+            st.write("Primera entrada del timeline:", timeline[0] if timeline else "Vacío")
+        
+        if isinstance(indice, dict) and 'data' in indice:
+            df_indice = indice['data']
+            st.write(f"Datos del índice: {len(df_indice) if df_indice is not None else 0} filas")
+            if df_indice is not None and len(df_indice) > 0:
+                st.write("Columnas del índice:", list(df_indice.columns) if hasattr(df_indice, 'columns') else "No es DataFrame")
+    
+    # Gráfico 1: Evolución del Índice del Portafolio
+    if isinstance(indice, dict) and 'data' in indice and indice['data'] is not None:
+        df_indice = indice['data']
+        
+        if len(df_indice) > 0:
+            fig_indice = go.Figure()
+            
             fig_indice.add_trace(go.Scatter(
-                x=[fecha],
-                y=[indice_fecha],
-                mode='markers',
-                name=f'Operaciones {fecha}',
-                marker=dict(
-                    size=10,
-                    color='red',
-                    symbol='diamond'
-                ),
-                hovertemplate=f'<b>Fecha:</b> {fecha}<br><b>Operaciones:</b> {len(ops_fecha)}<extra></extra>',
-                showlegend=False
+                x=df_indice['fecha'],
+                y=df_indice['indice'],
+                mode='lines',
+                name='Índice del Portafolio',
+                line=dict(color='#1f77b4', width=3),
+                hovertemplate='<b>Fecha:</b> %{x}<br><b>Índice:</b> %{y:.2f}<br><b>Valor:</b> $%{customdata:,.2f}<extra></extra>',
+                customdata=df_indice['valor']
             ))
-    
-    fig_indice.update_layout(
-        title='📈 Evolución del Índice del Portafolio con Operaciones',
-        xaxis_title='Fecha',
-        yaxis_title='Índice (Base 100)',
-        hovermode='x unified',
-        height=500,
-        template='plotly_white'
-    )
-    
-    st.plotly_chart(fig_indice, use_container_width=True)
+            
+            # Agregar operaciones como marcadores si hay operaciones
+            if operaciones is not None and len(operaciones) > 0:
+                try:
+                    fechas_ops = operaciones['fechaOrden'].dt.date
+                    for fecha in fechas_ops.unique():
+                        ops_fecha = operaciones[operaciones['fechaOrden'].dt.date == fecha]
+                        valor_fecha = df_indice[df_indice['fecha'] == fecha]['valor'].iloc[0] if len(df_indice[df_indice['fecha'] == fecha]) > 0 else None
+                        indice_fecha = df_indice[df_indice['fecha'] == fecha]['indice'].iloc[0] if len(df_indice[df_indice['fecha'] == fecha]) > 0 else None
+                        
+                        if valor_fecha and indice_fecha:
+                            fig_indice.add_trace(go.Scatter(
+                                x=[fecha],
+                                y=[indice_fecha],
+                                mode='markers',
+                                name=f'Operaciones {fecha}',
+                                marker=dict(
+                                    size=10,
+                                    color='red',
+                                    symbol='diamond'
+                                ),
+                                hovertemplate=f'<b>Fecha:</b> {fecha}<br><b>Operaciones:</b> {len(ops_fecha)}<extra></extra>',
+                                showlegend=False
+                            ))
+                except Exception as e:
+                    st.warning(f"⚠️ Error agregando operaciones al gráfico: {e}")
+            
+            fig_indice.update_layout(
+                title='📈 Evolución del Índice del Portafolio con Operaciones',
+                xaxis_title='Fecha',
+                yaxis_title='Índice (Base 100)',
+                hovermode='x unified',
+                height=500,
+                template='plotly_white'
+            )
+            
+            st.plotly_chart(fig_indice, use_container_width=True)
+        else:
+            st.warning("⚠️ No hay datos del índice para mostrar")
+    else:
+        st.warning("⚠️ No hay datos del índice disponibles")
     
     # Gráfico 2: Evolución de la Composición
     crear_grafico_composicion_evolutiva(timeline)
     
     # Gráfico 3: Análisis de Operaciones por Día
-    crear_grafico_operaciones_diarias(operaciones)
+    if operaciones is not None and len(operaciones) > 0:
+        crear_grafico_operaciones_diarias(operaciones)
+    else:
+        st.warning("⚠️ No hay operaciones para mostrar en el análisis diario")
 
 def crear_grafico_composicion_evolutiva(timeline):
     """
     Crea gráfico de evolución de la composición del portafolio
     """
+    if not timeline:
+        st.warning("⚠️ No hay datos de timeline para mostrar la evolución de la composición")
+        return
+    
     # Preparar datos para gráfico de área apilada
     fechas = [t['fecha'] for t in timeline]
     simbolos = set()
     for t in timeline:
-        simbolos.update(t['composicion'].keys())
+        if 'composicion' in t and t['composicion']:
+            simbolos.update(t['composicion'].keys())
     
     simbolos = sorted(list(simbolos))
+    
+    if not simbolos:
+        st.warning("⚠️ No se encontraron símbolos en la composición del portafolio")
+        return
     
     fig_composicion = go.Figure()
     
     for simbolo in simbolos:
         valores = []
         for t in timeline:
-            if simbolo in t['composicion']:
+            if 'composicion' in t and simbolo in t['composicion']:
                 valores.append(t['composicion'][simbolo]['valor'])
             else:
                 valores.append(0)
         
-        fig_composicion.add_trace(go.Scatter(
-            x=fechas,
-            y=valores,
-            mode='lines',
-            fill='tonexty',
-            name=simbolo,
-            hovertemplate=f'<b>{simbolo}</b><br>Valor: $%{{y:,.2f}}<extra></extra>'
-        ))
+        # Solo agregar si hay valores positivos
+        if any(v > 0 for v in valores):
+            fig_composicion.add_trace(go.Scatter(
+                x=fechas,
+                y=valores,
+                mode='lines',
+                fill='tonexty',
+                name=simbolo,
+                hovertemplate=f'<b>{simbolo}</b><br>Valor: $%{{y:,.2f}}<extra></extra>'
+            ))
+    
+    if len(fig_composicion.data) == 0:
+        st.warning("⚠️ No hay datos válidos para mostrar en el gráfico de composición")
+        return
     
     fig_composicion.update_layout(
         title='📊 Evolución de la Composición del Portafolio',
