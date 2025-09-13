@@ -15,19 +15,6 @@ import warnings
 import streamlit.components.v1 as components
 import matplotlib.pyplot as plt
 import time
-import seaborn as sns
-from streamlit_option_menu import option_menu
-import altair as alt
-from streamlit_aggrid import AgGrid, GridOptionsBuilder
-import streamlit_authenticator as stauth
-from streamlit_extras.metric_cards import style_metric_cards
-from streamlit_extras.colored_header import colored_header
-from streamlit_extras.dataframe_explorer import dataframe_explorer
-from streamlit_extras.app_logo import add_logo
-from streamlit_extras.badges import badge
-from streamlit_extras.let_it_rain import rain
-from streamlit_extras.stateful_button import button
-from streamlit_extras.switch_page_button import switch_page
 
 warnings.filterwarnings('ignore')
 
@@ -185,11 +172,7 @@ def calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador):
 
 def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_cliente=None):
     # Header con diseño avanzado
-    colored_header(
-        label=f"📈 Análisis de Portafolio - {portfolio_id.upper()}" if portfolio_id else "📈 Análisis de Portafolio",
-        description="Análisis completo del portafolio de inversiones",
-        color_name="blue-70"
-    )
+    st.markdown(f"### 📈 Análisis de Portafolio - {portfolio_id.upper()}" if portfolio_id else "### 📈 Análisis de Portafolio")
     
     # Mostrar información del cliente seleccionado
     if id_cliente:
@@ -216,13 +199,19 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
         with col4:
             st.metric("📊 Portafolio", portfolio_id.upper() if portfolio_id else "General")
         
-        # Aplicar estilos a las métricas
-        style_metric_cards(
-            background_color="#f0f2f6",
-            border_left_color="#1f77b4",
-            border_color="#1f77b4",
-            box_shadow="#f0f2f6"
-        )
+        # Aplicar estilos a las métricas con CSS personalizado
+        st.markdown("""
+        <style>
+        .metric-card {
+            background-color: #f0f2f6;
+            border-left: 4px solid #1f77b4;
+            border: 1px solid #1f77b4;
+            border-radius: 8px;
+            padding: 1rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        </style>
+        """, unsafe_allow_html=True)
         
         # Estado financiero en dashboard avanzado
         st.markdown("### 💰 Estado Financiero")
@@ -303,11 +292,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
         metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
         
         # Dashboard del portafolio con análisis avanzado
-        colored_header(
-            label="📊 Análisis del Portafolio",
-            description="Métricas clave y composición del portafolio",
-            color_name="violet-70"
-        )
+        st.markdown("### 📊 Análisis del Portafolio")
         
         # Métricas del portafolio con diseño avanzado
         col_port1, col_port2, col_port3, col_port4 = st.columns(4)
@@ -324,21 +309,23 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
         with col_port4:
             st.metric("💰 Valor", f"AR$ {valor_total:,.0f}", help="Valor total")
         
-        # Aplicar estilos a las métricas del portafolio
-        style_metric_cards(
-            background_color="#f0f2f6",
-            border_left_color="#ff7f0e",
-            border_color="#ff7f0e",
-            box_shadow="#f0f2f6"
-        )
+        # Aplicar estilos a las métricas del portafolio con CSS personalizado
+        st.markdown("""
+        <style>
+        .portfolio-metric {
+            background-color: #fff3e0;
+            border-left: 4px solid #ff7f0e;
+            border: 1px solid #ff7f0e;
+            border-radius: 8px;
+            padding: 1rem;
+            box-shadow: 0 2px 4px rgba(255,127,14,0.2);
+        }
+        </style>
+        """, unsafe_allow_html=True)
         
         if metricas:
             # Dashboard de Riesgo y Rendimiento
-            colored_header(
-                label="⚖️ Análisis de Riesgo y Rendimiento",
-                description="Evaluación integral del riesgo y proyecciones",
-                color_name="red-70"
-            )
+            st.markdown("### ⚖️ Análisis de Riesgo y Rendimiento")
             
             # Crear tabs para organizar la información
             tab_riesgo, tab_rendimiento, tab_probabilidades = st.tabs(["🎯 Riesgo", "📈 Rendimiento", "🎲 Probabilidades"])
@@ -461,11 +448,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
                 st.plotly_chart(fig_probs, use_container_width=True)
         
         # Visualizaciones del Portafolio
-        colored_header(
-            label="📊 Visualizaciones del Portafolio",
-            description="Análisis visual de la composición y distribución",
-            color_name="green-70"
-        )
+        st.markdown("### 📊 Visualizaciones del Portafolio")
         
         # Tabs para organizar las visualizaciones
         tab_composicion, tab_distribucion, tab_analisis = st.tabs(["🥧 Composición", "📈 Distribución", "📋 Análisis"])
@@ -550,38 +533,56 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="", id_c
                     st.plotly_chart(fig_box, use_container_width=True)
         
         with tab_analisis:
-            # Tabla interactiva con AgGrid
+            # Tabla interactiva con Streamlit estándar
             if len(df_activos) > 0:
                 # Preparar datos para la tabla
                 df_display = df_activos.copy()
                 df_display['Peso (%)'] = (df_display['Valuación'] / valor_total * 100).round(2)
                 df_display['Valuación'] = df_display['Valuación'].apply(lambda x: f"AR$ {x:,.2f}")
                 
-                # Configurar AgGrid
-                gb = GridOptionsBuilder.from_dataframe(df_display)
-                gb.configure_pagination(paginationAutoPageSize=True)
-                gb.configure_side_bar()
-                gb.configure_default_column(
-                    groupable=True,
-                    value=True,
-                    enableRowGroup=True,
-                    aggFunc='sum',
-                    editable=True
-                )
-                gb.configure_column("Símbolo", pinned="left")
-                gb.configure_column("Valuación", type=["numericColumn", "numberColumnFilter", "customNumericFormat"], precision=2)
-                
-                gridOptions = gb.build()
-                
                 st.markdown("### 📋 Tabla Detallada de Activos")
-                AgGrid(
-                    df_display,
-                    gridOptions=gridOptions,
-                    data_return_mode='AS_INPUT',
-                    update_mode='MODEL_CHANGED',
-                    fit_columns_on_grid_load=True,
-                    theme='alpine'
+                
+                # Opciones de filtrado
+                col_filtro1, col_filtro2 = st.columns(2)
+                with col_filtro1:
+                    tipo_filtro = st.selectbox("Filtrar por Tipo", ["Todos"] + list(df_display['Tipo'].unique()))
+                with col_filtro2:
+                    min_valor = st.number_input("Valor Mínimo (AR$)", min_value=0, value=0)
+                
+                # Aplicar filtros
+                df_filtrado = df_display.copy()
+                if tipo_filtro != "Todos":
+                    df_filtrado = df_filtrado[df_filtrado['Tipo'] == tipo_filtro]
+                df_filtrado = df_filtrado[df_filtrado['Valuación'].str.replace('AR$ ', '').str.replace(',', '').astype(float) >= min_valor]
+                
+                # Mostrar tabla con estilos
+                st.dataframe(
+                    df_filtrado,
+                    use_container_width=True,
+                    height=400,
+                    column_config={
+                        "Símbolo": st.column_config.TextColumn("Símbolo", width="small"),
+                        "Descripción": st.column_config.TextColumn("Descripción", width="medium"),
+                        "Tipo": st.column_config.TextColumn("Tipo", width="small"),
+                        "Cantidad": st.column_config.NumberColumn("Cantidad", format="%.2f"),
+                        "Precio": st.column_config.NumberColumn("Precio", format="AR$ %.2f"),
+                        "Valuación": st.column_config.TextColumn("Valuación", width="small"),
+                        "Peso (%)": st.column_config.NumberColumn("Peso (%)", format="%.2f%%")
+                    }
                 )
+                
+                # Estadísticas resumen
+                st.markdown("#### 📊 Estadísticas Resumen")
+                col_stats1, col_stats2, col_stats3 = st.columns(3)
+                
+                with col_stats1:
+                    st.metric("Total Activos", len(df_filtrado))
+                with col_stats2:
+                    valor_filtrado = df_filtrado['Valuación'].str.replace('AR$ ', '').str.replace(',', '').astype(float).sum()
+                    st.metric("Valor Filtrado", f"AR$ {valor_filtrado:,.2f}")
+                with col_stats3:
+                    peso_filtrado = df_filtrado['Peso (%)'].sum()
+                    st.metric("Peso Total", f"{peso_filtrado:.2f}%")
         
     else:
         st.warning("No se encontraron activos en el portafolio")
