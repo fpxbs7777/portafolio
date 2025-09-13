@@ -794,6 +794,409 @@ def obtener_portafolio_eeuu(token_portador, id_cliente):
         st.error(f'❌ Error inesperado al obtener portafolio de EEUU: {str(e)}')
         return None
 
+# --- FUNCIONES ASÍNCRONAS ---
+async def obtener_portafolio_async(token_portador, id_cliente, pais='Argentina'):
+    """
+    Versión asíncrona para obtener el portafolio de un cliente específico
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente (str): ID del cliente
+        pais (str): País del portafolio (default: 'Argentina')
+        
+    Returns:
+        dict: Portafolio del cliente o None en caso de error
+    """
+    url_portafolio = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url_portafolio, headers=encabezados, timeout=aiohttp.ClientTimeout(total=15)) as response:
+                if response.status == 200:
+                    return await response.json()
+                elif response.status == 401:
+                    st.error("Error de autenticación al obtener portafolio")
+                    return None
+                else:
+                    st.error(f"Error HTTP {response.status} al obtener portafolio")
+                    return None
+    except asyncio.TimeoutError:
+        st.error("Timeout al obtener portafolio")
+        return None
+    except Exception as e:
+        st.error(f'Error al obtener portafolio: {str(e)}')
+        return None
+
+async def obtener_portafolio_eeuu_async(token_portador, id_cliente):
+    """
+    Versión asíncrona para obtener el portafolio de Estados Unidos de un cliente específico
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente (str): ID del cliente
+        
+    Returns:
+        dict: Portafolio de EEUU del cliente o None en caso de error
+    """
+    # Intentar primero con el endpoint de Asesores
+    url_portafolio_asesores = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/estados_Unidos'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Primer intento: endpoint de Asesores
+            async with session.get(url_portafolio_asesores, headers=encabezados, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data
+                elif response.status == 404:
+                    st.info("ℹ️ No se encontró portafolio EEUU vía Asesores, intentando endpoint directo...")
+                    
+                    # Segundo intento: endpoint directo
+                    url_portafolio_directo = f'https://api.invertironline.com/api/v2/portafolio/estados_Unidos'
+                    async with session.get(url_portafolio_directo, headers=encabezados, timeout=aiohttp.ClientTimeout(total=30)) as response_directo:
+                        if response_directo.status == 200:
+                            data_directo = await response_directo.json()
+                            st.success(f"✅ Portafolio EEUU obtenido vía endpoint directo: {len(data_directo.get('activos', []))} activos")
+                            return data_directo
+                        elif response_directo.status == 401:
+                            st.error("❌ Error 401: Token de autenticación inválido o expirado")
+                            st.info("💡 Intente refrescar el token o inicie sesión nuevamente")
+                            return None
+                        elif response_directo.status == 403:
+                            st.error("❌ Error 403: Acceso denegado al portafolio de EEUU")
+                            st.info("💡 Verifique que su cuenta tenga permisos para acceder a portafolios de EEUU")
+                            return None
+                        else:
+                            st.error(f"❌ Error HTTP {response_directo.status} en endpoint directo")
+                            return None
+                            
+                elif response.status == 401:
+                    st.error("❌ Error 401: Token de autenticación inválido o expirado")
+                    st.info("💡 Intente refrescar el token o inicie sesión nuevamente")
+                    return None
+                elif response.status == 403:
+                    st.error("❌ Error 403: Acceso denegado al portafolio de EEUU")
+                    st.info("💡 Verifique que su cuenta tenga permisos para acceder a portafolios de EEUU")
+                    return None
+                else:
+                    st.error(f"❌ Error HTTP {response.status} en endpoint de Asesores")
+                    return None
+                    
+    except asyncio.TimeoutError:
+        st.error("⏱️ Timeout al obtener portafolio de EEUU")
+        return None
+    except aiohttp.ClientConnectionError:
+        st.error("🔌 Error de conexión al obtener portafolio de EEUU")
+        return None
+    except Exception as e:
+        st.error(f'❌ Error inesperado al obtener portafolio de EEUU: {str(e)}')
+        return None
+
+async def obtener_estado_cuenta_async(token_portador, id_cliente=None):
+    """
+    Versión asíncrona para obtener el estado de cuenta del cliente o del usuario autenticado
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente (str, optional): ID del cliente. Si es None, obtiene el estado de cuenta del usuario
+        
+    Returns:
+        dict: Estado de cuenta o None en caso de error
+    """
+    if id_cliente:
+        url_estado_cuenta = f'https://api.invertironline.com/api/v2/Asesores/EstadoDeCuenta/{id_cliente}'
+    else:
+        url_estado_cuenta = 'https://api.invertironline.com/api/v2/estadocuenta'
+    
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url_estado_cuenta, headers=encabezados, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status == 200:
+                    return await response.json()
+                elif response.status == 401:
+                    st.error("Error de autenticación al obtener estado de cuenta")
+                    return None
+                else:
+                    st.error(f"Error HTTP {response.status} al obtener estado de cuenta")
+                    return None
+    except asyncio.TimeoutError:
+        st.error("Timeout al obtener estado de cuenta")
+        return None
+    except Exception as e:
+        st.error(f'Error al obtener estado de cuenta: {str(e)}')
+        return None
+
+async def obtener_estado_cuenta_eeuu_async(token_portador):
+    """
+    Versión asíncrona para obtener el estado de cuenta de Estados Unidos del usuario autenticado
+    Filtra las cuentas que corresponden a EEUU del estado de cuenta general
+    
+    Args:
+        token_portador (str): Token de autenticación
+        
+    Returns:
+        dict: Estado de cuenta filtrado solo para cuentas de EEUU o None en caso de error
+    """
+    url_estado_cuenta = 'https://api.invertironline.com/api/v2/estadocuenta'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url_estado_cuenta, headers=encabezados, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    
+                    # Filtrar solo cuentas de EEUU
+                    if 'cuentas' in data:
+                        cuentas_eeuu = []
+                        for cuenta in data['cuentas']:
+                            if es_cuenta_eeuu(cuenta):
+                                cuentas_eeuu.append(cuenta)
+                        
+                        # Crear nuevo estado de cuenta solo con cuentas de EEUU
+                        estado_eeuu = data.copy()
+                        estado_eeuu['cuentas'] = cuentas_eeuu
+                        
+                        # Recalcular totales
+                        total_eeuu = sum(cuenta.get('total', 0) for cuenta in cuentas_eeuu)
+                        estado_eeuu['totalEnPesos'] = total_eeuu
+                        
+                        return estado_eeuu
+                    else:
+                        return data
+                elif response.status == 401:
+                    st.error("❌ Error 401: Token de autenticación inválido o expirado")
+                    return None
+                else:
+                    st.error(f"❌ Error HTTP {response.status} al obtener estado de cuenta de EEUU")
+                    return None
+    except asyncio.TimeoutError:
+        st.error("⏱️ Timeout al obtener estado de cuenta de EEUU")
+        return None
+    except Exception as e:
+        st.error(f'❌ Error inesperado al obtener estado de cuenta de EEUU: {str(e)}')
+        return None
+
+async def obtener_serie_historica_directa_async(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
+    """
+    Versión asíncrona para obtener serie histórica directamente de la API de IOL
+    
+    Args:
+        simbolo (str): Símbolo del activo
+        mercado (str): Mercado (bCBA, nYSE, nASDAQ, rOFEX, mERVAL)
+        fecha_desde (str): Fecha desde en formato YYYY-MM-DD
+        fecha_hasta (str): Fecha hasta en formato YYYY-MM-DD
+        ajustada (str): 'Ajustada' o 'SinAjustar'
+        bearer_token (str): Token de autenticación
+        
+    Returns:
+        list: Lista de datos históricos o None en caso de error
+    """
+    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {bearer_token}'
+    }
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    return None
+    except Exception as e:
+        return None
+
+async def obtener_historico_mep_async(token_acceso, fecha_desde, fecha_hasta):
+    """
+    Versión asíncrona para obtener el histórico del dólar MEP calculado como AL30/AL30D
+    
+    Args:
+        token_acceso (str): Token de acceso para la autenticación
+        fecha_desde (str): Fecha desde en formato YYYY-MM-DD
+        fecha_hasta (str): Fecha hasta en formato YYYY-MM-DD
+    
+    Returns:
+        dict: Diccionario con datos históricos del MEP calculado
+    """
+    try:
+        st.info(f"🔗 Consultando histórico MEP desde {fecha_desde} hasta {fecha_hasta}")
+        
+        # Usar el método directo para obtener series históricas
+        tickers_especificos = ['AL30', 'AL30D']
+        mercado = 'bCBA'
+        ajustada = 'SinAjustar'
+        
+        datos_series = {}
+        
+        # Crear tareas asíncronas para obtener ambas series en paralelo
+        tasks = []
+        for simbolo in tickers_especificos:
+            task = obtener_serie_historica_directa_async(
+                simbolo, mercado, fecha_desde, fecha_hasta, ajustada, token_acceso
+            )
+            tasks.append((simbolo, task))
+        
+        # Ejecutar todas las tareas en paralelo
+        for simbolo, task in tasks:
+            st.info(f"📊 Obteniendo datos históricos de {simbolo}...")
+            serie_historica = await task
+            
+            if serie_historica and len(serie_historica) > 0:
+                # Procesar los datos de la serie histórica
+                precios = []
+                fechas = []
+                
+                for item in serie_historica:
+                    try:
+                        precio = item.get('ultimoPrecio')
+                        if not precio or precio == 0:
+                            precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
+                        
+                        fecha_str = item.get('fechaHora') or item.get('fecha')
+                        
+                        if precio is not None and precio > 0 and fecha_str:
+                            fecha_parsed = parse_datetime_flexible(fecha_str)
+                            if fecha_parsed is not None:
+                                precios.append(precio)
+                                fechas.append(fecha_parsed)
+                                
+                    except Exception as e:
+                        continue
+                
+                if len(precios) > 0:
+                    datos_series[simbolo] = {
+                        'precios': precios,
+                        'fechas': fechas
+                    }
+                    st.success(f"✅ {simbolo}: {len(precios)} puntos de datos")
+                else:
+                    st.warning(f"⚠️ {simbolo}: No se encontraron datos válidos")
+            else:
+                st.warning(f"⚠️ {simbolo}: No se pudieron obtener datos históricos")
+        
+        # Verificar que tenemos datos para ambos tickers
+        if 'AL30' not in datos_series or 'AL30D' not in datos_series:
+            st.error("❌ No se pudieron obtener datos para AL30 o AL30D")
+            return None
+        
+        # Crear DataFrames y calcular MEP
+        df_al30 = pd.DataFrame({
+            'fecha': datos_series['AL30']['fechas'],
+            'precio_al30': datos_series['AL30']['precios']
+        })
+        
+        df_al30d = pd.DataFrame({
+            'fecha': datos_series['AL30D']['fechas'],
+            'precio_al30d': datos_series['AL30D']['precios']
+        })
+        
+        # Convertir fechas a datetime
+        df_al30['fecha'] = pd.to_datetime(df_al30['fecha'])
+        df_al30d['fecha'] = pd.to_datetime(df_al30d['fecha'])
+        
+        # Hacer merge por fecha
+        df_merged = pd.merge(df_al30, df_al30d, on='fecha', how='inner')
+        
+        # Calcular MEP
+        df_merged['mep'] = df_merged['precio_al30'] / df_merged['precio_al30d']
+        
+        # Ordenar por fecha
+        df_merged = df_merged.sort_values('fecha')
+        
+        st.success(f"✅ Se calcularon {len(df_merged)} valores de MEP históricos")
+        
+        # Convertir a formato esperado por la interfaz
+        datos_mep = []
+        for _, row in df_merged.iterrows():
+            datos_mep.append({
+                'fecha': row['fecha'].strftime('%Y-%m-%d'),
+                'fechaHora': row['fecha'].strftime('%Y-%m-%dT%H:%M:%S'),
+                'mep': row['mep'],
+                'al30_pesos': row['precio_al30'],
+                'al30d_dolares': row['precio_al30d'],
+                'ultimoPrecio': row['mep'],
+                'variacion': 0,  # Se calculará si es necesario
+                'moneda': 'peso_Argentino'
+            })
+        
+        return {
+            'datos': datos_mep,
+            'dataframe': df_merged,
+            'resumen': {
+                'total_registros': len(datos_mep),
+                'fecha_inicio': df_merged['fecha'].min().strftime('%Y-%m-%d'),
+                'fecha_fin': df_merged['fecha'].max().strftime('%Y-%m-%d'),
+                'mep_promedio': df_merged['mep'].mean(),
+                'mep_min': df_merged['mep'].min(),
+                'mep_max': df_merged['mep'].max()
+            }
+        }
+        
+    except Exception as e:
+        st.error(f"❌ Error calculando histórico MEP: {str(e)}")
+        return None
+
+# --- FUNCIONES WRAPPER PARA USAR ASYNC EN STREAMLIT ---
+def ejecutar_async(func_async, *args, **kwargs):
+    """
+    Ejecuta una función asíncrona en el contexto de Streamlit
+    
+    Args:
+        func_async: Función asíncrona a ejecutar
+        *args: Argumentos posicionales
+        **kwargs: Argumentos con nombre
+        
+    Returns:
+        Resultado de la función asíncrona
+    """
+    try:
+        # Crear un nuevo loop de eventos si no existe uno
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(func_async(*args, **kwargs))
+        finally:
+            loop.close()
+    except Exception as e:
+        st.error(f"Error ejecutando función asíncrona: {str(e)}")
+        return None
+
+def obtener_portafolio_async_wrapper(token_portador, id_cliente, pais='Argentina'):
+    """
+    Wrapper síncrono para obtener_portafolio_async
+    """
+    return ejecutar_async(obtener_portafolio_async, token_portador, id_cliente, pais)
+
+def obtener_portafolio_eeuu_async_wrapper(token_portador, id_cliente):
+    """
+    Wrapper síncrono para obtener_portafolio_eeuu_async
+    """
+    return ejecutar_async(obtener_portafolio_eeuu_async, token_portador, id_cliente)
+
+def obtener_estado_cuenta_async_wrapper(token_portador, id_cliente=None):
+    """
+    Wrapper síncrono para obtener_estado_cuenta_async
+    """
+    return ejecutar_async(obtener_estado_cuenta_async, token_portador, id_cliente)
+
+def obtener_estado_cuenta_eeuu_async_wrapper(token_portador):
+    """
+    Wrapper síncrono para obtener_estado_cuenta_eeuu_async
+    """
+    return ejecutar_async(obtener_estado_cuenta_eeuu_async, token_portador)
+
+def obtener_historico_mep_async_wrapper(token_acceso, fecha_desde, fecha_hasta):
+    """
+    Wrapper síncrono para obtener_historico_mep_async
+    """
+    return ejecutar_async(obtener_historico_mep_async, token_acceso, fecha_desde, fecha_hasta)
+
 def obtener_estado_cuenta_eeuu(token_portador):
     """
     Obtiene el estado de cuenta de Estados Unidos del usuario autenticado
@@ -1835,28 +2238,28 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                 df_precios_filled = df_precios.fillna(method='ffill').fillna(method='bfill')
                 
                 if not df_precios_filled.dropna().empty and len(df_precios_filled.dropna()) >= 30:
-                df_precios = df_precios_filled.dropna()
-                st.info("✅ Usando estrategia forward/backward fill")
+                    df_precios = df_precios_filled.dropna()
+                    st.info("✅ Usando estrategia forward/backward fill")
                 else:
                     # Estrategia 3: Interpolar valores faltantes
                     df_precios_interpolated = df_precios.interpolate(method='time')
                     
                     if not df_precios_interpolated.dropna().empty and len(df_precios_interpolated.dropna()) >= 30:
-                df_precios = df_precios_interpolated.dropna()
-                st.info("✅ Usando estrategia de interpolación")
-            else:
+                        df_precios = df_precios_interpolated.dropna()
+                        st.info("✅ Usando estrategia de interpolación")
+                    else:
                         # Estrategia 4: Usar cualquier dato disponible
-                df_precios = df_precios.dropna()
+                        df_precios = df_precios.dropna()
                         if df_precios.empty:
                             st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
                             return None, None, None
                         else:
                             st.warning(f"⚠️ Usando datos limitados: {len(df_precios)} observaciones")
-        
-        if df_precios.empty:
-            st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
-            return None, None, None
-        
+            
+            if df_precios.empty:
+                st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
+                return None, None, None
+                
         except Exception as e:
             st.error(f"❌ Error al alinear datos: {str(e)}")
             return None, None, None
@@ -4760,15 +5163,15 @@ def mostrar_estado_cuenta(estado_cuenta):
     Args:
         estado_cuenta (dict): Datos del estado de cuenta
     """
-        st.markdown("### 💰 Estado de Cuenta")
+    st.markdown("### 💰 Estado de Cuenta")
     
     if not estado_cuenta:
         st.warning("No hay datos de estado de cuenta disponibles")
         return
     
     # Estado de cuenta general
-        total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
-        cuentas = estado_cuenta.get('cuentas', [])
+    total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
+    cuentas = estado_cuenta.get('cuentas', [])
     
     # Contar cuentas únicas por número y tipo
     cuentas_unicas = {}
