@@ -4023,13 +4023,13 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
             
             # Nivel de concentración con colores y descripción
             with col3:
-                if metricas['concentracion'] < 0.3:
+            if metricas['concentracion'] < 0.3:
                     nivel = "🟢 Baja"
                     descripcion = "Portafolio bien diversificado"
-                elif metricas['concentracion'] < 0.6:
+            elif metricas['concentracion'] < 0.6:
                     nivel = "🟡 Media"
                     descripcion = "Concentración moderada"
-                else:
+            else:
                     nivel = "🔴 Alta"
                     descripcion = "Alta concentración de riesgo"
                 
@@ -4675,13 +4675,224 @@ def mostrar_estado_cuenta(estado_cuenta, es_eeuu=False):
             df_cuentas = pd.DataFrame(datos_cuentas)
             st.dataframe(df_cuentas, use_container_width=True, height=300)
 
-def mostrar_cotizaciones_mercado(token_acceso):
-    st.markdown("### 💱 Cotizaciones y Mercado")
+def obtener_parametros_operatoria_mep(token_acceso):
+    """
+    Obtiene los parámetros de operatoria MEP desde la API de IOL
     
-    with st.expander("💰 Cotización MEP", expanded=True):
+    Args:
+        token_acceso (str): Token de acceso para la autenticación
+    
+    Returns:
+        dict: Parámetros de operatoria MEP
+    """
+    # ID típico para operatoria MEP (esto puede variar según la configuración)
+    id_tipo_operatoria = 1  # Ajustar según la configuración real
+    
+    url = f'https://api.invertironline.com/api/v2/OperatoriaSimplificada/{id_tipo_operatoria}/Parametros'
+    
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_acceso}'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f'Error obteniendo parámetros MEP: {response.status_code}')
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        st.error(f'Error en la conexión: {e}')
+        return None
+
+def obtener_estimacion_compra_mep(token_acceso, monto):
+    """
+    Obtiene la estimación para comprar dólares MEP
+    
+    Args:
+        token_acceso (str): Token de acceso
+        monto (float): Monto en pesos
+    
+    Returns:
+        dict: Estimación de la operación
+    """
+    url = f'https://api.invertironline.com/api/v2/OperatoriaSimplificada/MontosEstimados/{monto}'
+    
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_acceso}'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f'Error obteniendo estimación compra: {response.status_code}')
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        st.error(f'Error en la conexión: {e}')
+        return None
+
+def obtener_estimacion_venta_mep(token_acceso, monto):
+    """
+    Obtiene la estimación para vender dólares MEP
+    
+    Args:
+        token_acceso (str): Token de acceso
+        monto (float): Monto en dólares
+    
+    Returns:
+        dict: Estimación de la operación
+    """
+    url = f'https://api.invertironline.com/api/v2/OperatoriaSimplificada/VentaMepSimple/MontosEstimados/{monto}'
+    
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_acceso}'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f'Error obteniendo estimación venta: {response.status_code}')
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        st.error(f'Error en la conexión: {e}')
+        return None
+
+def ejecutar_compra_mep(token_acceso, monto):
+    """
+    Ejecuta una compra de dólares MEP
+    
+    Args:
+        token_acceso (str): Token de acceso
+        monto (float): Monto en pesos
+    
+    Returns:
+        dict: Resultado de la operación
+    """
+    url = 'https://api.invertironline.com/api/v2/OperatoriaSimplificada/Comprar'
+    
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_acceso}'
+    }
+    
+    # Datos para la operación (ajustar según la configuración real)
+    data = {
+        "monto": monto,
+        "idTipoOperatoriaSimplificada": 1,  # ID para MEP
+        "idCuentaBancaria": 1  # ID de cuenta bancaria (ajustar según configuración)
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=data)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f'Error ejecutando compra MEP: {response.status_code}')
+            st.error(f'Respuesta: {response.text}')
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        st.error(f'Error en la conexión: {e}')
+        return None
+
+def ejecutar_venta_mep(token_acceso, monto):
+    """
+    Ejecuta una venta de dólares MEP
+    
+    Args:
+        token_acceso (str): Token de acceso
+        monto (float): Monto en dólares
+    
+    Returns:
+        dict: Resultado de la operación
+    """
+    url = 'https://api.invertironline.com/api/v2/OperatoriaSimplificada/VentaMepSimple'
+    
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_acceso}'
+    }
+    
+    # Datos para la operación (ajustar según la configuración real)
+    data = {
+        "monto": monto,
+        "idTipoOperatoriaSimplificada": 1,  # ID para MEP
+        "idCuentaBancaria": 1  # ID de cuenta bancaria (ajustar según configuración)
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=data)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f'Error ejecutando venta MEP: {response.status_code}')
+            st.error(f'Respuesta: {response.text}')
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        st.error(f'Error en la conexión: {e}')
+        return None
+
+def obtener_historico_mep(token_acceso, fecha_desde, fecha_hasta):
+    """
+    Obtiene el histórico del dólar MEP usando AL30 desde la API de IOL
+    
+    Args:
+        token_acceso (str): Token de acceso para la autenticación
+        fecha_desde (str): Fecha desde en formato YYYY-MM-DD
+        fecha_hasta (str): Fecha hasta en formato YYYY-MM-DD
+    
+    Returns:
+        list: Lista de datos históricos del AL30
+    """
+    url = f'https://api.invertironline.com/api/v2/bCBA/Titulos/al30/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/ajustada'
+    
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_acceso}'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code == 200:
+            datos_historicos = response.json()
+            return datos_historicos
+        else:
+            st.error(f'Error obteniendo histórico MEP: {response.status_code}')
+            st.error(f'Respuesta: {response.text}')
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        st.error(f'Error en la conexión: {e}')
+        return None
+
+def mostrar_cotizaciones_mercado(token_acceso):
+    st.markdown("### 💱 Dólares y Mercado")
+    
+    with st.expander("💰 Cotización Dólar MEP - Título Público AL30", expanded=True):
+        st.info("💡 **Dólar MEP**: Se calcula mediante la diferencia de precios entre la compra y venta del mismo título público (AL30) en pesos y dólares.")
+        
         with st.form("mep_form"):
             col1, col2, col3 = st.columns(3)
-            simbolo_mep = col1.text_input("Símbolo", value="AL30", help="Ej: AL30, GD30, etc.")
+            simbolo_mep = col1.text_input("Símbolo", value="AL30", help="Título público AL30 para cálculo MEP", disabled=True)
             id_plazo_compra = col2.number_input("ID Plazo Compra", value=1, min_value=1)
             id_plazo_venta = col3.number_input("ID Plazo Venta", value=1, min_value=1)
             
@@ -4698,6 +4909,230 @@ def mostrar_cotizaciones_mercado(token_acceso):
                         st.metric("Precio MEP", f"${precio_mep}" if precio_mep != 'N/A' else 'N/A')
                     else:
                         st.error("❌ No se pudo obtener la cotización MEP")
+    
+    # Sección para histórico del MEP
+    with st.expander("📈 Histórico del Dólar MEP (AL30)", expanded=False):
+        st.info("📊 Visualiza la evolución histórica del precio del AL30 para calcular el dólar MEP")
+        
+        with st.form("historico_mep_form"):
+            col1, col2 = st.columns(2)
+            with col1:
+                fecha_desde_hist = st.date_input(
+                    "Fecha desde", 
+                    value=date.today() - timedelta(days=30),
+                    help="Fecha de inicio del histórico"
+                )
+            with col2:
+                fecha_hasta_hist = st.date_input(
+                    "Fecha hasta", 
+                    value=date.today(),
+                    help="Fecha de fin del histórico"
+                )
+            
+            if st.form_submit_button("📊 Consultar Histórico MEP"):
+                if fecha_desde_hist and fecha_hasta_hist:
+                    with st.spinner("Obteniendo histórico del AL30..."):
+                        datos_historicos = obtener_historico_mep(
+                            token_acceso, 
+                            fecha_desde_hist.strftime('%Y-%m-%d'),
+                            fecha_hasta_hist.strftime('%Y-%m-%d')
+                        )
+                    
+                    if datos_historicos:
+                        st.success(f"✅ Se obtuvieron {len(datos_historicos)} registros históricos")
+                        
+                        # Convertir a DataFrame
+                        df_historico = pd.DataFrame(datos_historicos)
+                        df_historico['fechaHora'] = pd.to_datetime(df_historico['fechaHora'])
+                        df_historico = df_historico.sort_values('fechaHora')
+                        
+                        # Mostrar métricas principales
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            precio_actual = df_historico['ultimoPrecio'].iloc[-1] if len(df_historico) > 0 else 0
+                            st.metric("Precio Actual", f"${precio_actual:,.2f}")
+                        with col2:
+                            precio_max = df_historico['maximo'].max() if len(df_historico) > 0 else 0
+                            st.metric("Precio Máximo", f"${precio_max:,.2f}")
+                        with col3:
+                            precio_min = df_historico['minimo'].min() if len(df_historico) > 0 else 0
+                            st.metric("Precio Mínimo", f"${precio_min:,.2f}")
+                        with col4:
+                            variacion_total = ((precio_actual - df_historico['ultimoPrecio'].iloc[0]) / df_historico['ultimoPrecio'].iloc[0] * 100) if len(df_historico) > 0 else 0
+                            st.metric("Variación Total", f"{variacion_total:+.2f}%")
+                        
+                        # Gráfico con Plotly
+                        fig = go.Figure()
+                        
+                        # Línea de precio
+                        fig.add_trace(go.Scatter(
+                            x=df_historico['fechaHora'],
+                            y=df_historico['ultimoPrecio'],
+                            mode='lines',
+                            name='Precio AL30',
+                            line=dict(color='#1f77b4', width=2),
+                            hovertemplate='<b>Fecha:</b> %{x}<br><b>Precio:</b> $%{y:,.2f}<extra></extra>'
+                        ))
+                        
+                        # Línea de precio máximo
+                        fig.add_trace(go.Scatter(
+                            x=df_historico['fechaHora'],
+                            y=df_historico['maximo'],
+                            mode='lines',
+                            name='Máximo',
+                            line=dict(color='#ff7f0e', width=1, dash='dash'),
+                            opacity=0.7,
+                            hovertemplate='<b>Fecha:</b> %{x}<br><b>Máximo:</b> $%{y:,.2f}<extra></extra>'
+                        ))
+                        
+                        # Línea de precio mínimo
+                        fig.add_trace(go.Scatter(
+                            x=df_historico['fechaHora'],
+                            y=df_historico['minimo'],
+                            mode='lines',
+                            name='Mínimo',
+                            line=dict(color='#2ca02c', width=1, dash='dash'),
+                            opacity=0.7,
+                            hovertemplate='<b>Fecha:</b> %{x}<br><b>Mínimo:</b> $%{y:,.2f}<extra></extra>'
+                        ))
+                        
+                        # Configurar layout
+                        fig.update_layout(
+                            title='📈 Evolución Histórica del AL30 (Dólar MEP)',
+                            xaxis_title='Fecha',
+                            yaxis_title='Precio ($)',
+                            hovermode='x unified',
+                            showlegend=True,
+                            height=500,
+                            template='plotly_white'
+                        )
+                        
+                        # Formatear ejes
+                        fig.update_xaxes(
+                            tickformat='%d/%m/%Y',
+                            tickangle=45
+                        )
+                        fig.update_yaxes(
+                            tickformat='$,.0f'
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Tabla de datos
+                        st.subheader("📋 Datos Históricos")
+                        df_display = df_historico[['fechaHora', 'ultimoPrecio', 'variacion', 'maximo', 'minimo', 'volumenNominal']].copy()
+                        df_display.columns = ['Fecha', 'Precio', 'Variación', 'Máximo', 'Mínimo', 'Volumen']
+                        df_display['Fecha'] = df_display['Fecha'].dt.strftime('%d/%m/%Y %H:%M')
+                        df_display['Precio'] = df_display['Precio'].apply(lambda x: f"${x:,.2f}")
+                        df_display['Máximo'] = df_display['Máximo'].apply(lambda x: f"${x:,.2f}")
+                        df_display['Mínimo'] = df_display['Mínimo'].apply(lambda x: f"${x:,.2f}")
+                        df_display['Variación'] = df_display['Variación'].apply(lambda x: f"{x:+.2f}%")
+                        df_display['Volumen'] = df_display['Volumen'].apply(lambda x: f"{x:,.0f}")
+                        
+                        st.dataframe(df_display, use_container_width=True, height=300)
+                        
+                else:
+                        st.error("❌ No se pudo obtener el histórico del AL30")
+            else:
+                    st.warning("⚠️ Por favor seleccione fechas válidas")
+    
+    # Sección para operar con dólares MEP
+    with st.expander("💱 Operar con Dólares MEP", expanded=False):
+        st.info("💰 Realiza operaciones de compra y venta de dólares MEP usando la operatoria simplificada")
+        
+        # Obtener parámetros de operatoria MEP
+        with st.spinner("Obteniendo parámetros de operatoria MEP..."):
+            parametros_mep = obtener_parametros_operatoria_mep(token_acceso)
+        
+        if parametros_mep:
+            st.success("✅ Parámetros de operatoria MEP obtenidos")
+            
+            # Mostrar información de horarios
+            col1, col2 = st.columns(2)
+            with col1:
+                if parametros_mep.get('esHorarioValido'):
+                    st.success("🟢 Mercado abierto")
+                else:
+                    st.error("🔴 Mercado cerrado")
+            
+            with col2:
+                st.info(f"📅 Límite mínimo: ${parametros_mep.get('montoLimiteMinimo', 0):,.0f}")
+                st.info(f"📅 Límite máximo: ${parametros_mep.get('montoLimiteMaximo', 0):,.0f}")
+            
+            # Formulario de operación
+            with st.form("operar_mep_form"):
+                st.subheader("📊 Nueva Operación MEP")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    tipo_operacion = st.radio(
+                        "Tipo de operación:",
+                        ["Comprar USD", "Vender USD"],
+                        help="Comprar USD: Pesos → Dólares MEP\nVender USD: Dólares MEP → Pesos"
+                    )
+                
+                with col2:
+                    monto = st.number_input(
+                        "Monto:",
+                        min_value=1000.0,
+                        max_value=1000000.0,
+                        value=10000.0,
+                        step=1000.0,
+                        help="Monto en pesos para comprar USD o monto en USD para vender"
+                    )
+                
+                # Mostrar estimación de costos
+                if st.form_submit_button("💰 Calcular Estimación"):
+                    if monto:
+                        with st.spinner("Calculando estimación..."):
+                            if tipo_operacion == "Comprar USD":
+                                estimacion = obtener_estimacion_compra_mep(token_acceso, monto)
+                            else:
+                                estimacion = obtener_estimacion_venta_mep(token_acceso, monto)
+                        
+                        if estimacion:
+                            st.success("✅ Estimación calculada")
+                            
+                            # Mostrar estimación
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                if tipo_operacion == "Comprar USD":
+                                    st.metric("USD a recibir", f"${estimacion.get('montoDolar', 0):,.2f}")
+                                    st.metric("Pesos netos", f"${estimacion.get('montoNetoPesos', 0):,.2f}")
+                                else:
+                                    st.metric("Pesos a recibir", f"${estimacion.get('montoNetoPesos', 0):,.2f}")
+                                    st.metric("USD netos", f"${estimacion.get('montoDolar', 0):,.2f}")
+                            
+                            with col2:
+                                st.metric("Comisión compra", f"${estimacion.get('comisionCompra', 0):,.2f}")
+                                st.metric("Comisión venta", f"${estimacion.get('comisionVenta', 0):,.2f}")
+                            
+                            with col3:
+                                st.metric("Derecho mercado", f"${estimacion.get('derechoMercadoCompra', 0) + estimacion.get('derechoMercadoVenta', 0):,.2f}")
+                                st.metric("IVA", f"${estimacion.get('comisionCompraIVA', 0) + estimacion.get('comisionVentaIVA', 0):,.2f}")
+                            
+                            # Botón para ejecutar la operación
+                            if st.button("🚀 Ejecutar Operación", type="primary"):
+                                if tipo_operacion == "Comprar USD":
+                                    resultado = ejecutar_compra_mep(token_acceso, monto)
+                                else:
+                                    resultado = ejecutar_venta_mep(token_acceso, monto)
+                                
+                                if resultado and resultado.get('ok'):
+                                    st.success("✅ Operación ejecutada exitosamente")
+                                    for mensaje in resultado.get('messages', []):
+                                        st.info(f"📝 {mensaje.get('title', '')}: {mensaje.get('description', '')}")
+                                else:
+                                    st.error("❌ Error al ejecutar la operación")
+                                    if resultado:
+                                        for mensaje in resultado.get('messages', []):
+                                            st.error(f"❌ {mensaje.get('title', '')}: {mensaje.get('description', '')}")
+                        else:
+                            st.error("❌ No se pudo calcular la estimación")
+                    else:
+                        st.warning("⚠️ Por favor ingrese un monto válido")
+        else:
+            st.error("❌ No se pudieron obtener los parámetros de operatoria MEP")
     
 
 
@@ -6396,7 +6831,7 @@ def obtener_datos_benchmark_argentino(benchmark, token_acceso, fecha_desde, fech
     try:
         if benchmark == 'Tasa_Caucion_Promedio':
             # Simular retornos de tasa de caución promedio
-            fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+                        fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
             retornos_simulados = np.random.normal(0.0003, 0.01, len(fechas))  # 0.03% diario promedio
             return pd.DataFrame({'Tasa_Caucion_Promedio': retornos_simulados}, index=fechas)
         
@@ -7434,11 +7869,23 @@ def obtener_movimientos_reales(access_token, fecha_desde=None, fecha_hasta=None)
     
     try:
         st.info(f"🔗 Consultando operaciones desde {fecha_desde or 'inicio'} hasta {fecha_hasta or 'actual'}")
+        st.info(f"🔗 URL: {url}")
+        st.info(f"🔗 Parámetros: {params}")
+        
         response = requests.get(url, headers=headers, params=params)
         
         if response.status_code == 200:
             operaciones = response.json()
             st.success(f"📊 Se obtuvieron {len(operaciones)} operaciones")
+            
+            # Mostrar información de debug
+            if operaciones:
+                st.info(f"🔍 Primeras 3 operaciones: {operaciones[:3]}")
+                simbolos_encontrados = list(set([op.get('simbolo', 'N/A') for op in operaciones]))
+                st.info(f"🔍 Símbolos encontrados: {simbolos_encontrados}")
+            else:
+                st.warning("⚠️ No se encontraron operaciones en el período especificado")
+            
             return operaciones
         else:
             st.error(f'Error en la solicitud: {response.status_code}')
@@ -7829,7 +8276,7 @@ def mostrar_analisis_portafolio():
         "💰 Estado de Cuenta", 
         "🎯 Optimización y Cobertura",
         "📊 Análisis Técnico",
-        "💱 Cotizaciones",
+        "💱 Dólares y Mercado",
         "📈 Operaciones Reales"
     ])
 
