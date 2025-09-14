@@ -707,7 +707,18 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
     try:
         respuesta = requests.get(url_portafolio, headers=encabezados, timeout=15)  # Reducido de 30 a 15 segundos
         if respuesta.status_code == 200:
-            return respuesta.json()
+            portafolio = respuesta.json()
+            
+            # Validar que el portafolio corresponde al cliente correcto
+            if portafolio and id_cliente:
+                # Verificar que el portafolio tiene el cliente correcto
+                portafolio_cliente = portafolio.get('numeroCliente', portafolio.get('id', portafolio.get('cliente')))
+                if portafolio_cliente and str(portafolio_cliente) != str(id_cliente):
+                    st.warning(f"⚠️ Portafolio obtenido para cliente {portafolio_cliente}, pero se solicitó {id_cliente}")
+                else:
+                    st.info(f"✅ Portafolio validado para cliente {id_cliente}")
+            
+            return portafolio
         elif respuesta.status_code == 401:
             st.error("Error de autenticación al obtener portafolio")
             return None
@@ -9130,18 +9141,34 @@ def obtener_movimientos_reales(access_token, id_cliente=None, fecha_desde=None, 
             operaciones = response.json()
             st.success(f"📊 Se obtuvieron {len(operaciones)} operaciones via API")
             
-            # Mostrar información de debug
-            if operaciones:
-                simbolos_encontrados = list(set([op.get('simbolo', 'N/A') for op in operaciones]))
-                st.info(f"🔍 Símbolos encontrados: {simbolos_encontrados}")
+            # Validar que las operaciones corresponden al cliente correcto
+            if operaciones and id_cliente:
+                # Verificar que todas las operaciones tienen el cliente correcto
+                operaciones_filtradas = []
+                for op in operaciones:
+                    op_cliente = op.get('cuentaComitente', op.get('numeroCliente', op.get('id')))
+                    if str(op_cliente) == str(id_cliente):
+                        operaciones_filtradas.append(op)
+                    else:
+                        st.warning(f"⚠️ Operación con cliente diferente: {op_cliente} (esperado: {id_cliente})")
+                
+                if len(operaciones_filtradas) != len(operaciones):
+                    st.warning(f"⚠️ Filtradas {len(operaciones) - len(operaciones_filtradas)} operaciones de otros clientes")
+                    operaciones = operaciones_filtradas
+                
+                # Mostrar información de debug
+                if operaciones:
+                    simbolos_encontrados = list(set([op.get('simbolo', 'N/A') for op in operaciones]))
+                    st.info(f"🔍 Símbolos encontrados: {simbolos_encontrados}")
+                    
+                    # Mostrar primeras operaciones para verificación
+                    st.info(f"📊 Operaciones válidas para cliente {id_cliente}: {len(operaciones)}")
+                    if len(operaciones) > 0:
+                        st.info(f"🔍 Primeras 3 operaciones: {operaciones[:3]}")
+                else:
+                    st.warning("⚠️ No se encontraron operaciones válidas para el cliente especificado")
             else:
                 st.warning("⚠️ No se encontraron operaciones en el período especificado")
-            
-            # Mostrar información adicional sobre el filtrado
-            if operaciones:
-                st.info(f"📊 Operaciones obtenidas: {len(operaciones)}")
-                simbolos_unicos = list(set([op.get('simbolo', 'N/A') for op in operaciones]))
-                st.info(f"🔍 Activos encontrados: {len(simbolos_unicos)} únicos")
             
             return operaciones
         else:
@@ -9658,6 +9685,22 @@ def calcular_evolucion_portafolio_unificada(token_acceso, id_cliente, fecha_desd
         operaciones = obtener_movimientos_reales(token_acceso, id_cliente, fecha_desde, fecha_hasta)
         if not operaciones:
             return None
+        
+        # Validar que las operaciones tienen el cliente correcto
+        if operaciones:
+            clientes_ops = set()
+            for op in operaciones:
+                op_cliente = op.get('cuentaComitente', op.get('numeroCliente', op.get('id')))
+                if op_cliente:
+                    clientes_ops.add(str(op_cliente))
+            
+            if len(clientes_ops) > 1:
+                st.warning(f"⚠️ Operaciones de múltiples clientes detectadas: {clientes_ops}")
+            elif clientes_ops and list(clientes_ops)[0] != str(id_cliente):
+                st.error(f"❌ Operaciones no corresponden al cliente seleccionado. Cliente en operaciones: {list(clientes_ops)[0]}, Cliente seleccionado: {id_cliente}")
+                return None
+            else:
+                st.success(f"✅ Operaciones validadas para cliente {id_cliente}")
         
         # Obtener portafolio actual
         portafolio_actual = obtener_portafolio(token_acceso, id_cliente)
