@@ -9752,10 +9752,23 @@ def calcular_evolucion_portafolio_unificada(token_acceso, id_cliente, fecha_desd
         if portafolio_actual and 'activos' in portafolio_actual:
             st.info(f"🔍 Debug - Portafolio actual:")
             for i, activo in enumerate(portafolio_actual['activos'][:3]):  # Mostrar solo los primeros 3
-                simbolo = activo.get('simbolo', 'N/A')
-                cantidad = activo.get('cantidad', activo.get('cantidadNominal', 0))
-                valor = activo.get('valor', activo.get('valorActual', 0))
+                simbolo = activo.get('simbolo', activo.get('titulo', activo.get('denominacion', 'N/A')))
+                cantidad = activo.get('cantidad', activo.get('cantidadNominal', activo.get('nominales', 0)))
+                valor = activo.get('valor', activo.get('valorActual', activo.get('importe', 0)))
                 st.info(f"  {i+1}. {simbolo}: {cantidad} unidades, valor: ${valor:,.2f}")
+                # Mostrar todas las claves disponibles para debug
+                claves_disponibles = list(activo.keys())
+                st.info(f"     Claves disponibles: {claves_disponibles[:5]}...")  # Solo las primeras 5
+                
+                # Debug adicional: mostrar todos los valores numéricos
+                valores_numericos = {}
+                for clave, valor in activo.items():
+                    if isinstance(valor, (int, float)) and valor != 0:
+                        valores_numericos[clave] = valor
+                if valores_numericos:
+                    st.info(f"     Valores numéricos no cero: {valores_numericos}")
+                else:
+                    st.warning(f"     ⚠️ Todos los valores numéricos son 0 o nulos")
         
         # Procesar operaciones y crear timeline
         df_ops = pd.DataFrame(operaciones)
@@ -9820,7 +9833,17 @@ def crear_timeline_composicion(df_ops, portafolio_actual):
                     }
                 
                 if tipo == 'Compra':
-                    posiciones_actuales[simbolo]['cantidad'] += cantidad
+                    # Actualizar cantidad y precio promedio ponderado
+                    cantidad_anterior = posiciones_actuales[simbolo]['cantidad']
+                    valor_anterior = posiciones_actuales[simbolo]['valor_total']
+                    
+                    cantidad_nueva = cantidad_anterior + cantidad
+                    valor_nueva = valor_anterior + (cantidad * precio)
+                    
+                    posiciones_actuales[simbolo]['cantidad'] = cantidad_nueva
+                    posiciones_actuales[simbolo]['valor_total'] = valor_nueva
+                    posiciones_actuales[simbolo]['precio_promedio'] = valor_nueva / cantidad_nueva if cantidad_nueva > 0 else 0
+                    
                     posiciones_actuales[simbolo]['operaciones'].append({
                         'fecha': fecha,
                         'tipo': 'Compra',
@@ -9828,7 +9851,11 @@ def crear_timeline_composicion(df_ops, portafolio_actual):
                         'precio': precio
                     })
                 elif tipo == 'Venta':
+                    # Reducir cantidad manteniendo el precio promedio
                     posiciones_actuales[simbolo]['cantidad'] -= cantidad
+                    if posiciones_actuales[simbolo]['cantidad'] < 0:
+                        posiciones_actuales[simbolo]['cantidad'] = 0
+                    
                     posiciones_actuales[simbolo]['operaciones'].append({
                         'fecha': fecha,
                         'tipo': 'Venta',
@@ -9843,12 +9870,15 @@ def crear_timeline_composicion(df_ops, portafolio_actual):
             # Si es la fecha actual, usar el portafolio actual
             if fecha == datetime.now().date():
                 if portafolio_actual and 'activos' in portafolio_actual:
+                    # Verificar si el portafolio tiene valores válidos
+                    portafolio_valido = False
                     for activo in portafolio_actual['activos']:
-                        simbolo = activo.get('simbolo')
-                        cantidad = activo.get('cantidad', activo.get('cantidadNominal', 0))
-                        valor_activo = activo.get('valor', activo.get('valorActual', 0))
+                        simbolo = activo.get('simbolo', activo.get('titulo', activo.get('denominacion', activo.get('codigo'))))
+                        cantidad = activo.get('cantidad', activo.get('cantidadNominal', activo.get('nominales', 0)))
+                        valor_activo = activo.get('valor', activo.get('valorActual', activo.get('importe', 0)))
                         
-                        if simbolo and cantidad > 0:
+                        if simbolo and simbolo != 'N/A' and cantidad > 0 and valor_activo > 0:
+                            portafolio_valido = True
                             precio_actual = valor_activo / cantidad if cantidad > 0 else 0
                             valor_total += valor_activo
                             
@@ -9858,6 +9888,23 @@ def crear_timeline_composicion(df_ops, portafolio_actual):
                                 'valor': valor_activo,
                                 'peso': 0  # Se calculará después
                             }
+                    
+                    # Si el portafolio no tiene valores válidos, calcular basado en posiciones acumuladas
+                    if not portafolio_valido:
+                        st.warning("⚠️ Portafolio actual sin valores válidos, calculando basado en posiciones históricas")
+                        for simbolo, pos in posiciones_actuales.items():
+                            if pos['cantidad'] > 0:
+                                # Usar precio promedio de las operaciones como estimación
+                                precio_estimado = pos.get('precio_promedio', 100)  # Valor por defecto
+                                valor_activo = pos['cantidad'] * precio_estimado
+                                valor_total += valor_activo
+                                
+                                composicion[simbolo] = {
+                                    'cantidad': pos['cantidad'],
+                                    'precio_actual': precio_estimado,
+                                    'valor': valor_activo,
+                                    'peso': 0  # Se calculará después
+                                }
             else:
                 # Para fechas históricas, calcular basado en posiciones acumuladas
                 for simbolo, pos in posiciones_actuales.items():
@@ -9923,7 +9970,9 @@ def obtener_precio_actual_simbolo(portafolio_actual, simbolo):
             return None
         
         for activo in portafolio_actual['activos']:
-            if activo.get('simbolo') == simbolo:
+            # Buscar el símbolo en diferentes campos posibles
+            simbolo_activo = activo.get('simbolo', activo.get('titulo', activo.get('denominacion', activo.get('codigo'))))
+            if simbolo_activo == simbolo:
                 # Buscar precio en diferentes campos posibles
                 precio = activo.get('precio', activo.get('precioActual', activo.get('ultimoPrecio')))
                 if precio and precio > 0:
