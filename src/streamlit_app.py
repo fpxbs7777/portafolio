@@ -9143,30 +9143,57 @@ def obtener_movimientos_reales(access_token, id_cliente=None, fecha_desde=None, 
             
             # Validar que las operaciones corresponden al cliente correcto
             if operaciones and id_cliente:
-                # Verificar que todas las operaciones tienen el cliente correcto
-                operaciones_filtradas = []
+                # Verificar campos de cliente en las operaciones
+                campos_cliente = ['cuentaComitente', 'numeroCliente', 'id', 'cliente', 'accountId']
+                operaciones_con_cliente = []
+                operaciones_sin_cliente = []
+                
                 for op in operaciones:
-                    op_cliente = op.get('cuentaComitente', op.get('numeroCliente', op.get('id')))
-                    if str(op_cliente) == str(id_cliente):
-                        operaciones_filtradas.append(op)
+                    op_cliente = None
+                    for campo in campos_cliente:
+                        if campo in op and op[campo] is not None:
+                            op_cliente = op[campo]
+                            break
+                    
+                    if op_cliente is not None:
+                        operaciones_con_cliente.append((op, op_cliente))
                     else:
-                        st.warning(f"⚠️ Operación con cliente diferente: {op_cliente} (esperado: {id_cliente})")
+                        operaciones_sin_cliente.append(op)
                 
-                if len(operaciones_filtradas) != len(operaciones):
-                    st.warning(f"⚠️ Filtradas {len(operaciones) - len(operaciones_filtradas)} operaciones de otros clientes")
-                    operaciones = operaciones_filtradas
-                
-                # Mostrar información de debug
-                if operaciones:
+                # Si todas las operaciones tienen None como cliente, asumir que son del cliente solicitado
+                # (ya que la API fue llamada con filtro.cuentaComitente)
+                if len(operaciones_con_cliente) == 0 and len(operaciones_sin_cliente) == len(operaciones):
+                    st.info(f"ℹ️ Las operaciones no tienen campo de cliente, pero fueron obtenidas con filtro para cliente {id_cliente}")
+                    st.info(f"✅ Asumiendo que las {len(operaciones)} operaciones corresponden al cliente {id_cliente}")
+                    
+                    # Mostrar información de debug
                     simbolos_encontrados = list(set([op.get('simbolo', 'N/A') for op in operaciones]))
                     st.info(f"🔍 Símbolos encontrados: {simbolos_encontrados}")
+                    st.info(f"📊 Operaciones obtenidas: {len(operaciones)}")
                     
-                    # Mostrar primeras operaciones para verificación
-                    st.info(f"📊 Operaciones válidas para cliente {id_cliente}: {len(operaciones)}")
                     if len(operaciones) > 0:
                         st.info(f"🔍 Primeras 3 operaciones: {operaciones[:3]}")
                 else:
-                    st.warning("⚠️ No se encontraron operaciones válidas para el cliente especificado")
+                    # Filtrar operaciones que tienen cliente válido
+                    operaciones_filtradas = []
+                    for op, op_cliente in operaciones_con_cliente:
+                        if str(op_cliente) == str(id_cliente):
+                            operaciones_filtradas.append(op)
+                        else:
+                            st.warning(f"⚠️ Operación con cliente diferente: {op_cliente} (esperado: {id_cliente})")
+                    
+                    if len(operaciones_filtradas) != len(operaciones_con_cliente):
+                        st.warning(f"⚠️ Filtradas {len(operaciones_con_cliente) - len(operaciones_filtradas)} operaciones de otros clientes")
+                    
+                    operaciones = operaciones_filtradas
+                    
+                    # Mostrar información de debug
+                    if operaciones:
+                        simbolos_encontrados = list(set([op.get('simbolo', 'N/A') for op in operaciones]))
+                        st.info(f"🔍 Símbolos encontrados: {simbolos_encontrados}")
+                        st.info(f"📊 Operaciones válidas para cliente {id_cliente}: {len(operaciones)}")
+                    else:
+                        st.warning("⚠️ No se encontraron operaciones válidas para el cliente especificado")
             else:
                 st.warning("⚠️ No se encontraron operaciones en el período especificado")
             
@@ -9688,13 +9715,24 @@ def calcular_evolucion_portafolio_unificada(token_acceso, id_cliente, fecha_desd
         
         # Validar que las operaciones tienen el cliente correcto
         if operaciones:
+            campos_cliente = ['cuentaComitente', 'numeroCliente', 'id', 'cliente', 'accountId']
             clientes_ops = set()
-            for op in operaciones:
-                op_cliente = op.get('cuentaComitente', op.get('numeroCliente', op.get('id')))
-                if op_cliente:
-                    clientes_ops.add(str(op_cliente))
+            operaciones_con_cliente = 0
             
-            if len(clientes_ops) > 1:
+            for op in operaciones:
+                op_cliente = None
+                for campo in campos_cliente:
+                    if campo in op and op[campo] is not None:
+                        op_cliente = op[campo]
+                        operaciones_con_cliente += 1
+                        clientes_ops.add(str(op_cliente))
+                        break
+            
+            # Si no hay operaciones con cliente válido, asumir que son del cliente solicitado
+            if operaciones_con_cliente == 0:
+                st.info(f"ℹ️ Las operaciones no tienen campo de cliente válido, asumiendo que corresponden al cliente {id_cliente}")
+                st.success(f"✅ Operaciones asumidas para cliente {id_cliente}")
+            elif len(clientes_ops) > 1:
                 st.warning(f"⚠️ Operaciones de múltiples clientes detectadas: {clientes_ops}")
             elif clientes_ops and list(clientes_ops)[0] != str(id_cliente):
                 st.error(f"❌ Operaciones no corresponden al cliente seleccionado. Cliente en operaciones: {list(clientes_ops)[0]}, Cliente seleccionado: {id_cliente}")
