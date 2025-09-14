@@ -9748,6 +9748,15 @@ def calcular_evolucion_portafolio_unificada(token_acceso, id_cliente, fecha_desd
         
         st.info(f"📊 Portafolio actual obtenido: {len(portafolio_actual.get('activos', []))} activos")
         
+        # Debug: Mostrar información del portafolio actual
+        if portafolio_actual and 'activos' in portafolio_actual:
+            st.info(f"🔍 Debug - Portafolio actual:")
+            for i, activo in enumerate(portafolio_actual['activos'][:3]):  # Mostrar solo los primeros 3
+                simbolo = activo.get('simbolo', 'N/A')
+                cantidad = activo.get('cantidad', activo.get('cantidadNominal', 0))
+                valor = activo.get('valor', activo.get('valorActual', 0))
+                st.info(f"  {i+1}. {simbolo}: {cantidad} unidades, valor: ${valor:,.2f}")
+        
         # Procesar operaciones y crear timeline
         df_ops = pd.DataFrame(operaciones)
         df_ops['fechaOrden'] = pd.to_datetime(df_ops['fechaOrden'], format='mixed').dt.tz_localize(None)
@@ -9827,53 +9836,50 @@ def crear_timeline_composicion(df_ops, portafolio_actual):
                         'precio': precio
                     })
             
-            # Calcular valor del portafolio en esta fecha basado en posiciones actuales
+            # Calcular valor del portafolio en esta fecha
             valor_total = 0
             composicion = {}
             
-            # Calcular valor total basado en posiciones actuales
-            for simbolo, pos in posiciones_actuales.items():
-                if pos['cantidad'] > 0:  # Solo posiciones activas
-                    # Obtener precio actual del símbolo
-                    precio_actual = obtener_precio_actual_simbolo(portafolio_actual, simbolo)
-                    if precio_actual and precio_actual > 0:
-                        valor_activo = pos['cantidad'] * precio_actual
-                        valor_total += valor_activo
+            # Si es la fecha actual, usar el portafolio actual
+            if fecha == datetime.now().date():
+                if portafolio_actual and 'activos' in portafolio_actual:
+                    for activo in portafolio_actual['activos']:
+                        simbolo = activo.get('simbolo')
+                        cantidad = activo.get('cantidad', activo.get('cantidadNominal', 0))
+                        valor_activo = activo.get('valor', activo.get('valorActual', 0))
                         
-                        composicion[simbolo] = {
-                            'cantidad': pos['cantidad'],
-                            'precio_actual': precio_actual,
-                            'valor': valor_activo,
-                            'peso': 0  # Se calculará después
-                        }
-            
-            # Si no hay posiciones activas, usar flujo de efectivo simple
-            if valor_total == 0 and len(ops_fecha) > 0:
-                # Calcular flujo neto del día
-                flujo_dia = 0
-                for _, op in ops_fecha.iterrows():
-                    try:
-                        cantidad = float(op['cantidadOperada']) if pd.notna(op['cantidadOperada']) else 0
-                        precio = float(op['precioOperado']) if pd.notna(op['precioOperado']) else 0
-                        
-                        if cantidad > 0 and precio > 0:
-                            monto = cantidad * precio
-                            if op['tipo'] == 'Venta':
-                                flujo_dia += monto
-                            elif op['tipo'] == 'Compra':
-                                flujo_dia -= monto
-                    except (ValueError, TypeError):
-                        continue
+                        if simbolo and cantidad > 0:
+                            precio_actual = valor_activo / cantidad if cantidad > 0 else 0
+                            valor_total += valor_activo
+                            
+                            composicion[simbolo] = {
+                                'cantidad': cantidad,
+                                'precio_actual': precio_actual,
+                                'valor': valor_activo,
+                                'peso': 0  # Se calculará después
+                            }
+            else:
+                # Para fechas históricas, calcular basado en posiciones acumuladas
+                for simbolo, pos in posiciones_actuales.items():
+                    if pos['cantidad'] > 0:  # Solo posiciones activas
+                        # Obtener precio actual del símbolo desde el portafolio actual
+                        precio_actual = obtener_precio_actual_simbolo(portafolio_actual, simbolo)
+                        if precio_actual and precio_actual > 0:
+                            valor_activo = pos['cantidad'] * precio_actual
+                            valor_total += valor_activo
+                            
+                            composicion[simbolo] = {
+                                'cantidad': pos['cantidad'],
+                                'precio_actual': precio_actual,
+                                'valor': valor_activo,
+                                'peso': 0  # Se calculará después
+                            }
                 
-                # Usar el valor anterior más el flujo del día
-                if timeline:
+                # Si no hay posiciones activas en esta fecha, usar valor del día anterior
+                if valor_total == 0 and timeline:
                     valor_anterior = timeline[-1]['valor_total']
-                    if pd.notna(valor_anterior) and not np.isnan(valor_anterior):
-                        valor_total = float(valor_anterior) + flujo_dia
-                    else:
-                        valor_total = flujo_dia
-                else:
-                    valor_total = flujo_dia
+                    if pd.notna(valor_anterior) and not np.isnan(valor_anterior) and valor_anterior > 0:
+                        valor_total = float(valor_anterior)
             
             # Calcular pesos basados en valores reales
             if valor_total > 0:
@@ -9921,23 +9927,28 @@ def obtener_precio_actual_simbolo(portafolio_actual, simbolo):
                 # Buscar precio en diferentes campos posibles
                 precio = activo.get('precio', activo.get('precioActual', activo.get('ultimoPrecio')))
                 if precio and precio > 0:
-                    return precio
+                    return float(precio)
                 
                 # Si no hay precio, calcular desde valor y cantidad
                 valor = activo.get('valor', activo.get('valorActual'))
                 cantidad = activo.get('cantidad', activo.get('cantidadNominal'))
                 if valor and cantidad and cantidad > 0:
-                    return valor / cantidad
+                    return float(valor) / float(cantidad)
                 
                 # Si aún no hay precio, buscar en campos alternativos
                 precio_compra = activo.get('precioCompra', activo.get('precioPromedio'))
                 if precio_compra and precio_compra > 0:
-                    return precio_compra
+                    return float(precio_compra)
                 
                 # Buscar en más campos posibles
                 precio_mercado = activo.get('precioMercado', activo.get('precioCotizacion'))
                 if precio_mercado and precio_mercado > 0:
-                    return precio_mercado
+                    return float(precio_mercado)
+                
+                # Último intento: usar precio de cotización
+                precio_cotizacion = activo.get('cotizacion', activo.get('precioCotizacion'))
+                if precio_cotizacion and precio_cotizacion > 0:
+                    return float(precio_cotizacion)
         
         # Si no se encuentra en el portafolio actual, retornar None
         return None
